@@ -42,6 +42,11 @@ def _docker_client() -> docker.DockerClient:
         ) from exc
 
 
+def check_docker_connection() -> None:
+    """Valide que la connexion au daemon Docker est opérationnelle."""
+    _docker_client()
+
+
 def _ensure_cache_dir(path: Path) -> Path:
     """Crée le dossier de cache Hugging Face local s'il n'existe pas."""
     path.mkdir(parents=True, exist_ok=True)

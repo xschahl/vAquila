@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from vaquila.config import CONFIG
-from vaquila.docker_service import list_managed_containers, run_model_container, stop_model_container
+from vaquila.docker_service import (
+    check_docker_connection,
+    list_managed_containers,
+    run_model_container,
+    stop_model_container,
+)
 from vaquila.exceptions import VaquilaError
 from vaquila.gpu import compute_gpu_memory_utilization, read_gpu_snapshot
 
@@ -20,6 +26,22 @@ def _format_gb(value_bytes: int | None) -> str:
     if value_bytes is None:
         return "n/a"
     return f"{value_bytes / (1024**3):.2f} Gio"
+
+
+def _check_hf_cache_path() -> str:
+    """Vérifie que le cache Hugging Face est accessible en lecture/écriture."""
+    path = CONFIG.hf_cache_host_path
+    path.mkdir(parents=True, exist_ok=True)
+
+    if not path.is_dir():
+        raise VaquilaError(f"Le chemin de cache n'est pas un dossier: {path}")
+
+    readable = os.access(path, os.R_OK)
+    writable = os.access(path, os.W_OK)
+    if not readable or not writable:
+        raise VaquilaError(f"Permissions insuffisantes sur le cache: {path} (read={readable}, write={writable})")
+
+    return str(path)
 
 
 @app.command("run")
@@ -105,4 +127,51 @@ def stop(
         console.print(f"[bold green]✅ Conteneur supprimé:[/bold green] [cyan]{name}[/cyan]")
     except VaquilaError as exc:
         console.print(f"[bold red]❌ {exc}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@app.command("doctor")
+def doctor(
+    gpu_index: int = typer.Option(0, "--gpu", help="Index GPU NVIDIA à vérifier"),
+) -> None:
+    """Vérifie l'environnement d'exécution (Docker, GPU, cache)."""
+    checks: list[tuple[str, bool, str]] = []
+
+    try:
+        check_docker_connection()
+        checks.append(("Docker daemon", True, "Connexion OK"))
+    except VaquilaError as exc:
+        checks.append(("Docker daemon", False, str(exc)))
+
+    try:
+        snapshot = read_gpu_snapshot(gpu_index)
+        details = (
+            f"GPU {gpu_index} détecté | total={snapshot.total_bytes / (1024**3):.2f} Gio "
+            f"free={snapshot.free_bytes / (1024**3):.2f} Gio"
+        )
+        checks.append(("NVIDIA / NVML", True, details))
+    except VaquilaError as exc:
+        checks.append(("NVIDIA / NVML", False, str(exc)))
+
+    try:
+        cache_path = _check_hf_cache_path()
+        checks.append(("Cache Hugging Face", True, cache_path))
+    except VaquilaError as exc:
+        checks.append(("Cache Hugging Face", False, str(exc)))
+
+    table = Table(title="vAquila Doctor")
+    table.add_column("Check")
+    table.add_column("Statut")
+    table.add_column("Détails")
+
+    has_failure = False
+    for label, ok, details in checks:
+        status = "[green]OK[/green]" if ok else "[red]KO[/red]"
+        if not ok:
+            has_failure = True
+        table.add_row(label, status, details)
+
+    console.print(table)
+
+    if has_failure:
         raise typer.Exit(code=1)

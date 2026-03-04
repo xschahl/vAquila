@@ -63,6 +63,12 @@ Stop a model container:
 docker compose run --rm vaq stop meta-llama/Llama-3-8B-Instruct
 ```
 
+Run environment preflight checks:
+
+```bash
+docker compose run --rm vaq doctor --gpu 0
+```
+
 ### Windows note
 
 On Docker Desktop (Linux containers), prefer a daemon-readable Linux-style path in `.env` for `VAQ_HF_CACHE_HOST_PATH`.
@@ -71,7 +77,7 @@ On Docker Desktop (Linux containers), prefer a daemon-readable Linux-style path 
 
 ```text
 src/vaquila/
-├─ cli.py             # Typer commands: run, ps, stop
+├─ cli.py             # Typer commands: run, ps, stop, doctor
 ├─ config.py          # Runtime configuration
 ├─ docker_service.py  # Docker SDK orchestration
 ├─ gpu.py             # NVML GPU memory checks
