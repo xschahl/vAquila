@@ -25,3 +25,11 @@ class ManagedContainer:
     host_port: int | None
     gpu_index: int | None
     gpu_used_bytes: int | None
+    gpu_utilization: float | None
+    max_num_seqs: int | None
+    max_model_len: int | None
+    tool_call_parser: str | None
+    reasoning_parser: str | None
+    enable_thinking: bool | None
+    required_ratio: float | None
+    allow_long_context_override: bool | None
