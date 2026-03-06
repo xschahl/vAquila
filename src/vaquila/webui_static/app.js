@@ -23,16 +23,73 @@ const logsTarget = document.getElementById("logs-target");
 const logsOutput = document.getElementById("logs-output");
 const logsClose = document.getElementById("logs-close");
 const logsRefresh = document.getElementById("logs-refresh");
+const themeToggle = document.getElementById("theme-toggle");
 
 const MAX_NOTIFICATIONS = 5;
+const THEME_STORAGE_KEY = "vaquila.webui.theme";
 
 let selectedLogSource = null;
 let logsInterval = null;
 let refreshErrorNotified = false;
 let lastLogsErrorKey = null;
 let tasksSnapshotReady = false;
+let themeTransitionTimer = null;
 
 const taskStates = new Map();
+
+function resolveInitialTheme() {
+  let persisted = null;
+  try {
+    persisted = window.localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    persisted = null;
+  }
+  if (persisted === "light" || persisted === "dark") {
+    return persisted;
+  }
+
+  if (window.matchMedia?.("(prefers-color-scheme: light)")?.matches) {
+    return "light";
+  }
+  return "dark";
+}
+
+function applyTheme(theme) {
+  const normalized = theme === "light" ? "light" : "dark";
+  document.body.classList.add("is-theme-animating");
+  document.body.dataset.theme = normalized;
+  document.documentElement.style.colorScheme = normalized;
+
+  if (themeTransitionTimer !== null) {
+    window.clearTimeout(themeTransitionTimer);
+  }
+  themeTransitionTimer = window.setTimeout(() => {
+    document.body.classList.remove("is-theme-animating");
+    themeTransitionTimer = null;
+  }, 380);
+
+  if (themeToggle) {
+    themeToggle.textContent =
+      normalized === "dark" ? "Light mode" : "Dark mode";
+    themeToggle.setAttribute("aria-pressed", String(normalized === "light"));
+  }
+}
+
+function initTheme() {
+  const initial = resolveInitialTheme();
+  applyTheme(initial);
+
+  themeToggle?.addEventListener("click", () => {
+    const current = document.body.dataset.theme === "light" ? "light" : "dark";
+    const next = current === "dark" ? "light" : "dark";
+    applyTheme(next);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage errors and keep the in-memory theme state.
+    }
+  });
+}
 
 function setStatus(message, type = "info") {
   toast.textContent = message;
@@ -263,6 +320,15 @@ function formatGiB(bytes) {
   return (Number(bytes || 0) / 1024 ** 3).toFixed(2);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function parseFormValue(value) {
   if (value === "") return undefined;
   if (value === "true") return true;
@@ -293,6 +359,17 @@ function makeCell(label, value) {
   const td = document.createElement("td");
   td.dataset.label = label;
   td.textContent = value ?? "-";
+  return td;
+}
+
+function makeStatusCell(label, statusValue) {
+  const td = document.createElement("td");
+  const normalized = String(statusValue || "unknown").toLowerCase();
+  td.dataset.label = label;
+  const chip = document.createElement("span");
+  chip.className = `status-chip status-${normalized}`;
+  chip.textContent = String(statusValue || "unknown");
+  td.appendChild(chip);
   return td;
 }
 
@@ -442,18 +519,89 @@ function renderGpu(items) {
     const card = document.createElement("article");
     card.className = "gpu-card";
 
-    const modelsMarkup =
-      Array.isArray(gpu.models) && gpu.models.length
-        ? gpu.models
-            .map(
-              (model) => `
-              <div class="gpu-model-item">
-                <span>${model.model_id}</span>
-                <span>${formatGiB(model.used_bytes)} GiB</span>
-              </div>`,
-            )
-            .join("")
-        : '<div class="empty-state">No running model currently mapped to this GPU.</div>';
+    const modelEntries = Array.isArray(gpu.models)
+      ? gpu.models
+          .map((model, index) => {
+            const modelBytes = Number(model.used_bytes || 0);
+            const modelRatio =
+              totalBytes > 0 ? Math.max(0, (modelBytes / totalBytes) * 100) : 0;
+            const hue = (206 + index * 47) % 360;
+            return {
+              modelId: String(model.model_id || "Unknown model"),
+              bytes: modelBytes,
+              ratio: modelRatio,
+              color: `hsl(${hue} 72% 56%)`,
+            };
+          })
+          .filter((entry) => entry.bytes > 0)
+      : [];
+
+    const modelUsedBytes = modelEntries.reduce(
+      (acc, entry) => acc + entry.bytes,
+      0,
+    );
+    const residualUsedBytes = Math.max(0, usedBytes - modelUsedBytes);
+    const residualRatio =
+      totalBytes > 0 ? (residualUsedBytes / totalBytes) * 100 : 0;
+    const freeRatio = totalBytes > 0 ? Math.max(0, 100 - ratio) : 0;
+
+    const segmentParts = [];
+    modelEntries.forEach((entry) => {
+      segmentParts.push(`
+        <span
+          class="gpu-segment gpu-segment-model"
+          style="width:${entry.ratio.toFixed(3)}%;--seg-color:${entry.color};"
+          data-tooltip="${escapeHtml(`${entry.modelId} - ${formatGiB(entry.bytes)} GiB VRAM`)}"
+          aria-label="${escapeHtml(`${entry.modelId} uses ${formatGiB(entry.bytes)} GiB VRAM`)}"
+        ></span>
+      `);
+    });
+
+    if (residualRatio > 0.05) {
+      segmentParts.push(`
+        <span
+          class="gpu-segment gpu-segment-system"
+          style="width:${residualRatio.toFixed(3)}%;"
+          data-tooltip="System or unmanaged usage - ${formatGiB(residualUsedBytes)} GiB VRAM"
+          aria-label="System or unmanaged usage: ${formatGiB(residualUsedBytes)} GiB VRAM"
+        ></span>
+      `);
+    }
+
+    if (freeRatio > 0.05) {
+      segmentParts.push(`
+        <span
+          class="gpu-segment gpu-segment-free"
+          style="width:${freeRatio.toFixed(3)}%;"
+          data-tooltip="Free VRAM - ${formatGiB(freeBytes)} GiB"
+          aria-label="Free VRAM: ${formatGiB(freeBytes)} GiB"
+        ></span>
+      `);
+    }
+
+    const modelsMarkup = modelEntries.length
+      ? [
+          ...modelEntries.map(
+            (entry) => `
+            <div class="gpu-model-item">
+              <span class="gpu-model-name">
+                <span class="legend-swatch" style="--seg-color:${entry.color};"></span>
+                ${escapeHtml(entry.modelId)}
+              </span>
+              <span>${formatGiB(entry.bytes)} GiB</span>
+            </div>`,
+          ),
+          residualRatio > 0.05
+            ? `<div class="gpu-model-item">
+                <span class="gpu-model-name">
+                  <span class="legend-swatch legend-swatch-system"></span>
+                  System / unmanaged
+                </span>
+                <span>${formatGiB(residualUsedBytes)} GiB</span>
+              </div>`
+            : "",
+        ].join("")
+      : '<div class="empty-state">No running model currently mapped to this GPU.</div>';
 
     card.innerHTML = `
       <div class="gpu-title">
@@ -465,7 +613,7 @@ function renderGpu(items) {
         <span>${formatGiB(freeBytes)} GiB free</span>
         <span>${formatGiB(totalBytes)} GiB total</span>
       </div>
-      <div class="progress-track"><span style="width:${Math.max(0, Math.min(ratio, 100))}%"></span></div>
+      <div class="progress-track gpu-stack">${segmentParts.join("")}</div>
       <div class="gpu-models">${modelsMarkup}</div>
     `;
 
@@ -490,7 +638,7 @@ function renderContainers(items) {
     const tr = document.createElement("tr");
     tr.appendChild(makeCell("Name", container.name));
     tr.appendChild(makeCell("Model", container.model_id));
-    tr.appendChild(makeCell("Status", container.status));
+    tr.appendChild(makeStatusCell("Status", container.status));
     tr.appendChild(makeCell("Port", String(container.host_port ?? "-")));
     tr.appendChild(makeCell("GPU", String(container.gpu_index ?? "-")));
 
@@ -588,7 +736,7 @@ function renderTasks(items) {
   items.forEach((task) => {
     const tr = document.createElement("tr");
     tr.appendChild(makeCell("Model", task.model_id));
-    tr.appendChild(makeCell("Status", task.status));
+    tr.appendChild(makeStatusCell("Status", task.status));
     tr.appendChild(makeCell("Container", task.container_name || "-"));
     tr.appendChild(makeCell("Message", task.message || "-"));
     tr.appendChild(makeCell("Started", formatDate(task.started_at)));
@@ -822,5 +970,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+initTheme();
 refreshAll();
 setInterval(() => refreshAll({ notifyOnFailure: false }), 6000);

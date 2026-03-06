@@ -9,6 +9,8 @@
   </head>
   <body>
     <div class="shell"></div>
+    <div class="atmo-lines" aria-hidden="true"></div>
+    <div class="atmo-orb" aria-hidden="true"></div>
     <div id="notification-center" aria-live="polite" aria-atomic="false"></div>
     <main class="app-shell">
       <header class="hero-card">
@@ -32,11 +34,12 @@
             </div>
           </div>
           <div class="hero-copy">
-            <span class="eyebrow">Local orchestration cockpit</span>
+            <span class="eyebrow">Local AI operations</span>
             <h1>vAquila Control Center</h1>
             <p>
-              Launch models, inspect GPU pressure, tail container logs, and run
-              inference from a single, production-ready dashboard.
+              Operate your local vLLM runtime with confidence: launch models,
+              monitor VRAM, inspect logs, and validate inference from one
+              reliable control surface.
             </p>
             <div class="hero-actions">
               <span class="auto-refresh-pill"
@@ -53,7 +56,17 @@
             <span class="dot"></span
             ><span id="status-health">Service online</span>
           </div>
-          <div id="toast" class="status-text">Ready.</div>
+          <div class="status-actions">
+            <button
+              type="button"
+              id="theme-toggle"
+              class="theme-toggle"
+              aria-label="Toggle color theme"
+            >
+              Light mode
+            </button>
+            <div id="toast" class="status-text">Ready.</div>
+          </div>
         </div>
       </header>
 
