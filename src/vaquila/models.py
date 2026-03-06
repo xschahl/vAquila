@@ -1,4 +1,4 @@
-"""Modèles de données internes pour l'orchestration."""
+"""Internal data models for orchestration."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class GpuSnapshot:
-    """Snapshot mémoire d'un GPU NVIDIA."""
+    """Memory snapshot for an NVIDIA GPU."""
 
     index: int
     total_bytes: int
@@ -17,7 +17,7 @@ class GpuSnapshot:
 
 @dataclass(frozen=True)
 class ManagedContainer:
-    """Projection d'un conteneur vAquila affichée par la commande `ps`."""
+    """vAquila container projection displayed by the `ps` command."""
 
     name: str
     model_id: str
@@ -25,3 +25,11 @@ class ManagedContainer:
     host_port: int | None
     gpu_index: int | None
     gpu_used_bytes: int | None
+    gpu_utilization: float | None
+    max_num_seqs: int | None
+    max_model_len: int | None
+    tool_call_parser: str | None
+    reasoning_parser: str | None
+    enable_thinking: bool | None
+    required_ratio: float | None
+    allow_long_context_override: bool | None

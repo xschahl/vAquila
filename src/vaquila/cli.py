@@ -1,177 +1,157 @@
-"""Entrée CLI principale de vAquila."""
+"""vAquila main CLI entrypoint."""
 
 from __future__ import annotations
 
-import os
 import typer
-from rich.console import Console
-from rich.table import Table
 
-from vaquila.config import CONFIG
-from vaquila.docker_service import (
-    check_docker_connection,
-    list_managed_containers,
-    run_model_container,
-    stop_model_container,
+from vaquila.cli_commands import (
+    cmd_doctor,
+    cmd_infer,
+    cmd_list_models,
+    cmd_ps,
+    cmd_rm_model,
+    cmd_run,
+    cmd_stop,
 )
-from vaquila.exceptions import VaquilaError
-from vaquila.gpu import compute_gpu_memory_utilization, read_gpu_snapshot
+from vaquila.config import CONFIG
 
 app = typer.Typer(help="vAquila - Orchestration vLLM + Docker")
-console = Console()
 
 
-def _format_gb(value_bytes: int | None) -> str:
-    """Affiche des octets en Gio lisibles."""
-    if value_bytes is None:
-        return "n/a"
-    return f"{value_bytes / (1024**3):.2f} Gio"
+@app.command("list")
+def list_models() -> None:
+    """List models available in the local Hugging Face cache."""
+    cmd_list_models()
 
 
-def _check_hf_cache_path() -> str:
-    """Vérifie que le cache Hugging Face est accessible en lecture/écriture."""
-    path = CONFIG.hf_cache_host_path
-    path.mkdir(parents=True, exist_ok=True)
-
-    if not path.is_dir():
-        raise VaquilaError(f"Le chemin de cache n'est pas un dossier: {path}")
-
-    readable = os.access(path, os.R_OK)
-    writable = os.access(path, os.W_OK)
-    if not readable or not writable:
-        raise VaquilaError(f"Permissions insuffisantes sur le cache: {path} (read={readable}, write={writable})")
-
-    return str(path)
+@app.command("rm")
+def rm_model(
+    model_id: str = typer.Argument(..., help="Hugging Face model id to remove from cache"),
+) -> None:
+    """Remove a model from the local Hugging Face cache."""
+    cmd_rm_model(model_id)
 
 
 @app.command("run")
 def run(
-    model_id: str = typer.Argument(..., help="Model id Hugging Face, ex: meta-llama/Llama-3-8B-Instruct"),
-    port: int = typer.Option(CONFIG.default_host_port, "--port", "-p", help="Port hôte exposé"),
-    gpu_index: int = typer.Option(0, "--gpu", help="Index GPU NVIDIA"),
+    model_id: str = typer.Argument(..., help="Hugging Face model id, e.g. meta-llama/Llama-3-8B-Instruct"),
+    port: int = typer.Option(CONFIG.default_host_port, "--port", "-p", help="Exposed host port"),
+    gpu_index: int = typer.Option(0, "--gpu", help="NVIDIA GPU index"),
     buffer_gb: float = typer.Option(
-        CONFIG.security_vram_buffer_gb,
+        None,
         "--buffer-gb",
-        help="Buffer VRAM en Gio réservé pour l'OS/processus tiers",
+        help="VRAM safety buffer in GiB reserved for OS/other processes (optional, auto by OS)",
+    ),
+    startup_timeout: int = typer.Option(
+        900,
+        "--startup-timeout",
+        help="Model startup timeout in seconds",
+    ),
+    max_num_seqs: int | None = typer.Option(
+        None,
+        "--max-num-seqs",
+        help="Maximum parallel requests (default: 1)",
+    ),
+    max_model_len: int | None = typer.Option(
+        None,
+        "--max-model-len",
+        help="Per-request context length in tokens (default: 16384)",
+    ),
+    tool_call_parser: str | None = typer.Option(
+        None,
+        "--tool-call-parser",
+        help="vLLM tool call parser (default: none)",
+    ),
+    reasoning_parser: str | None = typer.Option(
+        None,
+        "--reasoning-parser",
+        help="vLLM reasoning parser (default: none)",
+    ),
+    enable_thinking: bool | None = typer.Option(
+        None,
+        "--enable-thinking/--disable-thinking",
+        help="Enable/disable thinking mode (if omitted: interactive prompt, default=true)",
+    ),
+    allow_long_context_override: bool | None = typer.Option(
+        None,
+        "--allow-long-context-override/--no-allow-long-context-override",
+        help="Allow context length above model limit (risky). If omitted: interactive prompt when needed.",
+    ),
+    quantization: str = typer.Option(
+        "auto",
+        "--quantization",
+        help="vLLM quantization (auto, none, fp8, awq, gptq...).",
+    ),
+    kv_cache_dtype: str | None = typer.Option(
+        None,
+        "--kv-cache-dtype",
+        help="KV cache dtype: fp16 or fp8 (if omitted: interactive prompt)",
     ),
 ) -> None:
-    """Lance un modèle dans un conteneur vLLM en arrière-plan."""
-    try:
-        snapshot = read_gpu_snapshot(gpu_index)
-        ratio = compute_gpu_memory_utilization(snapshot, security_buffer_gb=buffer_gb)
-
-        container = run_model_container(
-            model_id=model_id,
-            host_port=port,
-            gpu_index=gpu_index,
-            gpu_utilization=ratio,
-            config=CONFIG,
-        )
-
-        console.print("[bold green]✅ Modèle lancé[/bold green]")
-        console.print(f"Conteneur: [cyan]{container.name}[/cyan]")
-        console.print(f"API vLLM: [cyan]http://localhost:{port}[/cyan]")
-        console.print(f"GPU: [cyan]{gpu_index}[/cyan] | Utilization: [cyan]{ratio:.3f}[/cyan]")
-    except VaquilaError as exc:
-        console.print(f"[bold red]❌ {exc}[/bold red]")
-        raise typer.Exit(code=1)
+    """Launch a model in a background vLLM container."""
+    cmd_run(
+        model_id=model_id,
+        port=port,
+        gpu_index=gpu_index,
+        buffer_gb=buffer_gb,
+        startup_timeout=startup_timeout,
+        max_num_seqs=max_num_seqs,
+        max_model_len=max_model_len,
+        tool_call_parser=tool_call_parser,
+        reasoning_parser=reasoning_parser,
+        enable_thinking=enable_thinking,
+        allow_long_context_override=allow_long_context_override,
+        quantization=quantization,
+        kv_cache_dtype=kv_cache_dtype,
+    )
 
 
 @app.command("ps")
 def ps() -> None:
-    """Liste les conteneurs vAquila actifs et leurs infos runtime."""
-    try:
-        snapshot = read_gpu_snapshot(0)
-        snapshot_by_gpu = {0: snapshot}
-    except VaquilaError:
-        snapshot_by_gpu = None
-
-    try:
-        containers = list_managed_containers(snapshot_by_gpu=snapshot_by_gpu)
-    except VaquilaError as exc:
-        console.print(f"[bold red]❌ {exc}[/bold red]")
-        raise typer.Exit(code=1)
-
-    if not containers:
-        console.print("[yellow]Aucun conteneur vAquila trouvé.[/yellow]")
-        return
-
-    table = Table(title="vAquila - Conteneurs")
-    table.add_column("Nom")
-    table.add_column("Modèle")
-    table.add_column("Statut")
-    table.add_column("Port")
-    table.add_column("GPU")
-    table.add_column("VRAM utilisée")
-
-    for item in containers:
-        table.add_row(
-            item.name,
-            item.model_id,
-            item.status,
-            str(item.host_port) if item.host_port is not None else "n/a",
-            str(item.gpu_index) if item.gpu_index is not None else "n/a",
-            _format_gb(item.gpu_used_bytes),
-        )
-
-    console.print(table)
+    """List active vAquila containers and runtime details."""
+    cmd_ps()
 
 
 @app.command("stop")
 def stop(
-    model_id: str = typer.Argument(..., help="Model id Hugging Face à arrêter"),
+    model_id: str = typer.Argument(..., help="Hugging Face model id to stop"),
+    purge_cache: bool = typer.Option(
+        False,
+        "--purge-cache",
+        help="Also remove the model local Hugging Face cache after stop",
+    ),
 ) -> None:
-    """Stoppe et supprime le conteneur lié au modèle."""
-    try:
-        name = stop_model_container(model_id)
-        console.print(f"[bold green]✅ Conteneur supprimé:[/bold green] [cyan]{name}[/cyan]")
-    except VaquilaError as exc:
-        console.print(f"[bold red]❌ {exc}[/bold red]")
-        raise typer.Exit(code=1)
+    """Stop and remove the container linked to a model."""
+    cmd_stop(model_id=model_id, purge_cache=purge_cache)
 
 
 @app.command("doctor")
 def doctor(
-    gpu_index: int = typer.Option(0, "--gpu", help="Index GPU NVIDIA à vérifier"),
+    gpu_index: int = typer.Option(0, "--gpu", help="NVIDIA GPU index to validate"),
 ) -> None:
-    """Vérifie l'environnement d'exécution (Docker, GPU, cache)."""
-    checks: list[tuple[str, bool, str]] = []
+    """Validate runtime environment (Docker, GPU, cache)."""
+    cmd_doctor(gpu_index=gpu_index)
 
-    try:
-        check_docker_connection()
-        checks.append(("Docker daemon", True, "Connexion OK"))
-    except VaquilaError as exc:
-        checks.append(("Docker daemon", False, str(exc)))
 
-    try:
-        snapshot = read_gpu_snapshot(gpu_index)
-        details = (
-            f"GPU {gpu_index} détecté | total={snapshot.total_bytes / (1024**3):.2f} Gio "
-            f"free={snapshot.free_bytes / (1024**3):.2f} Gio"
-        )
-        checks.append(("NVIDIA / NVML", True, details))
-    except VaquilaError as exc:
-        checks.append(("NVIDIA / NVML", False, str(exc)))
-
-    try:
-        cache_path = _check_hf_cache_path()
-        checks.append(("Cache Hugging Face", True, cache_path))
-    except VaquilaError as exc:
-        checks.append(("Cache Hugging Face", False, str(exc)))
-
-    table = Table(title="vAquila Doctor")
-    table.add_column("Check")
-    table.add_column("Statut")
-    table.add_column("Détails")
-
-    has_failure = False
-    for label, ok, details in checks:
-        status = "[green]OK[/green]" if ok else "[red]KO[/red]"
-        if not ok:
-            has_failure = True
-        table.add_row(label, status, details)
-
-    console.print(table)
-
-    if has_failure:
-        raise typer.Exit(code=1)
+@app.command("infer")
+def infer(
+    model_id: str = typer.Argument(..., help="Model id used for the chat completion call"),
+    prompt: str = typer.Argument(..., help="User prompt sent to the model"),
+    base_url: str = typer.Option(
+        CONFIG.inference_base_url,
+        "--base-url",
+        help="Base URL of the vLLM OpenAI-compatible API",
+    ),
+    max_tokens: int = typer.Option(128, "--max-tokens", help="Maximum number of generated tokens"),
+    temperature: float = typer.Option(0.2, "--temperature", help="Sampling temperature"),
+    timeout: int = typer.Option(120, "--timeout", help="HTTP timeout in seconds"),
+) -> None:
+    """Test inference against an already running model through the vLLM API."""
+    cmd_infer(
+        model_id=model_id,
+        prompt=prompt,
+        base_url=base_url,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        timeout=timeout,
+    )

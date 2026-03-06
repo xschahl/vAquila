@@ -1,0 +1,165 @@
+"""vLLM startup helpers and log parsing utilities."""
+
+from __future__ import annotations
+
+import re
+import time
+from contextlib import suppress
+
+from rich.console import Console
+
+from vaquila.docker_service import get_container
+from vaquila.exceptions import VaquilaError
+
+_READY_MARKERS = (
+    "Application startup complete",
+    "Uvicorn running on",
+)
+
+_DOWNLOAD_PHASE_MARKERS: tuple[tuple[str, str], ...] = (
+    ("snapshot_download", "Downloading Hugging Face weights..."),
+    ("hf_hub_download", "Downloading model files..."),
+    ("download_weights_from_hf", "Downloading model weights..."),
+    ("file_download", "Downloading artifacts..."),
+)
+
+_LOAD_PHASE_MARKERS: tuple[tuple[str, str], ...] = (
+    ("Starting to load model", "Loading model into VRAM..."),
+    ("Resolved architecture", "Model architecture detected..."),
+    ("Initializing a V1 LLM engine", "Initializing vLLM engine..."),
+)
+
+_HF_PROGRESS_RE = re.compile(r"(\d{1,3})%\s+Completed\s+\|\s*(\d+)/(\d+)")
+_KV_CONCURRENCY_RE = re.compile(
+    r"Maximum concurrency for\s*([\d,]+)\s*tokens per request:\s*([0-9]+(?:\.[0-9]+)?)x"
+)
+
+
+def clean_log_line(line: str) -> str:
+    """Clean a vLLM log prefix for CLI display."""
+    cleaned = re.sub(r"^\([^)]*\)\s*", "", line).strip()
+    return cleaned
+
+
+def extract_startup_hint(log_text: str) -> str:
+    """Return a readable startup progress hint from vLLM logs."""
+    progress_matches = _HF_PROGRESS_RE.findall(log_text)
+    if progress_matches:
+        percent, current, total = progress_matches[-1]
+        return f"Loading weights (shards): {percent}% ({current}/{total})"
+
+    for marker, message in _DOWNLOAD_PHASE_MARKERS:
+        if marker in log_text:
+            return message
+
+    for marker, message in _LOAD_PHASE_MARKERS:
+        if marker in log_text:
+            return message
+
+    lines = [line.strip() for line in log_text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        cleaned = clean_log_line(line)
+        if "ERROR" in cleaned:
+            return f"Error detected: {cleaned[:140]}"
+        if any(token in cleaned for token in ("INFO", "WARNING", "Starting", "loading", "download")):
+            return cleaned[:140]
+
+    return "Starting vLLM server..."
+
+
+def extract_root_error(log_text: str) -> str | None:
+    """Extract a useful root cause from startup logs."""
+    lines = [line.strip() for line in log_text.splitlines() if line.strip()]
+
+    disk_error_tokens = (
+        "Not enough free disk space",
+        "No space left on device",
+    )
+    for line in lines:
+        if any(token in line for token in disk_error_tokens):
+            return clean_log_line(line)
+
+    value_error_lines = [line for line in lines if "ValueError:" in line]
+    if value_error_lines:
+        return clean_log_line(value_error_lines[-1])
+
+    specific_runtime_lines = [
+        line for line in lines if "RuntimeError:" in line and "Engine core initialization failed" not in line
+    ]
+    if specific_runtime_lines:
+        return clean_log_line(specific_runtime_lines[-1])
+
+    runtime_error_lines = [line for line in lines if "RuntimeError:" in line]
+    if runtime_error_lines:
+        return clean_log_line(runtime_error_lines[-1])
+
+    error_lines = [line for line in lines if "ERROR" in line]
+    if error_lines:
+        return clean_log_line(error_lines[-1])
+
+    return None
+
+
+def extract_kv_max_concurrency(log_text: str, request_tokens: int) -> float | None:
+    """Extract observed KV max concurrency for a given context size."""
+    matches = _KV_CONCURRENCY_RE.findall(log_text)
+    if not matches:
+        return None
+
+    target_value: float | None = None
+    fallback_value: float | None = None
+    for tokens_text, concurrency_text in matches:
+        with suppress(ValueError):
+            parsed_tokens = int(tokens_text.replace(",", ""))
+            parsed_concurrency = float(concurrency_text)
+            fallback_value = parsed_concurrency
+            if parsed_tokens == request_tokens:
+                target_value = parsed_concurrency
+
+    return target_value if target_value is not None else fallback_value
+
+
+def wait_until_model_ready(console: Console, container_name: str, timeout_seconds: int = 900) -> None:
+    """Follow vLLM startup logs and wait until the API is ready."""
+    started = time.monotonic()
+    last_hint = "Starting vLLM server..."
+
+    with console.status(f"[cyan]{last_hint}[/cyan]", spinner="dots") as status:
+        while time.monotonic() - started < timeout_seconds:
+            elapsed = int(time.monotonic() - started)
+            runtime_container = get_container(container_name)
+            runtime_container.reload()
+            log_text = runtime_container.logs(tail=250).decode("utf-8", errors="replace")
+
+            if not log_text.strip():
+                hint = (
+                    "Preparing vLLM runtime... "
+                    f"({elapsed}s, first launch may trigger Hugging Face downloads)"
+                )
+            else:
+                hint = extract_startup_hint(log_text)
+
+            if hint != last_hint:
+                last_hint = hint
+                status.update(f"[cyan]{hint}[/cyan]")
+
+            if any(marker in log_text for marker in _READY_MARKERS):
+                return
+
+            if runtime_container.status in {"exited", "dead"}:
+                root_error = extract_root_error(log_text)
+                detail = (
+                    f" Probable cause: {root_error}"
+                    if root_error
+                    else " Check container logs for detailed root cause."
+                )
+                raise VaquilaError(
+                    f"Container `{container_name}` stopped during initialization.{detail}"
+                )
+
+            time.sleep(2)
+
+    raise VaquilaError(
+        f"Startup timeout ({timeout_seconds}s). The model may still be downloading. "
+        f"Follow logs: docker logs -f {container_name}"
+    )

@@ -5,13 +5,16 @@ services:
       dockerfile: Dockerfile
     image: vaquila:dev
     gpus: all
+    env_file: ".env"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${VAQ_HF_CACHE_HOST_PATH}:/root/.cache/huggingface
     environment:
       - VAQ_HF_CACHE_HOST_PATH=${VAQ_HF_CACHE_HOST_PATH}
       - VAQ_VLLM_IMAGE=${VAQ_VLLM_IMAGE:-vllm/vllm-openai:latest}
       - VAQ_SECURITY_VRAM_BUFFER_GB=${VAQ_SECURITY_VRAM_BUFFER_GB:-1.5}
       - VAQ_DEFAULT_HOST_PORT=${VAQ_DEFAULT_HOST_PORT:-8000}
+      - VAQ_INFERENCE_BASE_URL=${VAQ_INFERENCE_BASE_URL:-http://host.docker.internal:8000}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     stdin_open: true

@@ -1,4 +1,4 @@
-"""Module d'exécution directe de la CLI."""
+"""Direct execution module for the CLI."""
 
 from vaquila.cli import app
 
