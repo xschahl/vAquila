@@ -15,9 +15,9 @@ vAquila orchestrates everything for you. Like an eagle soaring over your infrast
 
 ### Planned Features (Roadmap)
 
-- [ ] **Auto-VRAM**: Automatic calculation of the `--gpu-memory-utilization` flag via NVML to prevent crashes.
-- [ ] **One-Click Deployment**: Download and run models via a simple `vaq run <hf-model>` command.
-- [ ] **Docker Orchestration**: Invisible management of containers, exposed ports, and Hugging Face cache.
+- [x] **Auto-VRAM**: Automatic calculation of the `--gpu-memory-utilization` flag via NVML to prevent crashes.
+- [x] **One-Click Deployment**: Download and run models via a simple `vaq run <hf-model>` command.
+- [x] **Docker Orchestration**: Invisible management of containers, exposed ports, and Hugging Face cache.
 - [ ] **Web UI**: A local dashboard to monitor active models and live GPU usage.
 
 ## 🚀 Quickstart (Docker-first MVP)
