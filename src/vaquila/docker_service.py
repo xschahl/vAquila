@@ -188,6 +188,7 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
     for container in containers:
         labels = container.labels or {}
         model_id = labels.get("com.vaquila.model_id", "unknown")
+        instance_id = labels.get("com.vaquila.instance_id") or container.short_id
         gpu_idx_value = labels.get("com.vaquila.gpu_index")
 
         gpu_index: int | None = None
@@ -282,6 +283,7 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
                 enable_thinking=enable_thinking,
                 required_ratio=required_ratio,
                 allow_long_context_override=allow_long_context_override,
+                instance_id=instance_id,
             )
         )
 

@@ -320,6 +320,18 @@ function formatGiB(bytes) {
   return (Number(bytes || 0) / 1024 ** 3).toFixed(2);
 }
 
+function getInstanceId(item) {
+  if (item?.instance_id) return String(item.instance_id);
+  if (item?.name) {
+    const normalized = String(item.name);
+    if (normalized.startsWith("vaq-")) {
+      return normalized.slice(4);
+    }
+    return normalized;
+  }
+  return "unknown";
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -407,11 +419,13 @@ function renderInferenceTargets(items) {
   }
 
   runningContainers.forEach((container, index) => {
+    const instanceId = getInstanceId(container);
     const option = document.createElement("option");
     option.value = container.name;
-    option.textContent = `${container.model_id} • localhost:${container.host_port}`;
+    option.textContent = `${container.model_id} #${instanceId} • localhost:${container.host_port}`;
     option.dataset.modelId = container.model_id;
     option.dataset.baseUrl = `http://localhost:${container.host_port}`;
+    option.dataset.instanceId = instanceId;
     if (index === 0) option.selected = true;
     inferTarget.appendChild(option);
   });
@@ -430,7 +444,7 @@ function updateInferenceHint() {
     return;
   }
 
-  inferEndpointHint.textContent = `${selectedOption.dataset.modelId} via ${selectedOption.dataset.baseUrl}`;
+  inferEndpointHint.textContent = `${selectedOption.dataset.modelId} #${selectedOption.dataset.instanceId || "-"} via ${selectedOption.dataset.baseUrl}`;
 }
 
 function openLogsModal(source) {
@@ -526,8 +540,11 @@ function renderGpu(items) {
             const modelRatio =
               totalBytes > 0 ? Math.max(0, (modelBytes / totalBytes) * 100) : 0;
             const hue = (206 + index * 47) % 360;
+            const instanceId = getInstanceId(model);
+            const displayName = `${String(model.model_id || "Unknown model")} #${instanceId}`;
             return {
               modelId: String(model.model_id || "Unknown model"),
+              displayName,
               bytes: modelBytes,
               ratio: modelRatio,
               color: `hsl(${hue} 72% 56%)`,
@@ -551,8 +568,8 @@ function renderGpu(items) {
         <span
           class="gpu-segment gpu-segment-model"
           style="width:${entry.ratio.toFixed(3)}%;--seg-color:${entry.color};"
-          data-tooltip="${escapeHtml(`${entry.modelId} - ${formatGiB(entry.bytes)} GiB VRAM`)}"
-          aria-label="${escapeHtml(`${entry.modelId} uses ${formatGiB(entry.bytes)} GiB VRAM`)}"
+          data-tooltip="${escapeHtml(`${entry.displayName} - ${formatGiB(entry.bytes)} GiB VRAM`)}"
+          aria-label="${escapeHtml(`${entry.displayName} uses ${formatGiB(entry.bytes)} GiB VRAM`)}"
         ></span>
       `);
     });
@@ -586,7 +603,7 @@ function renderGpu(items) {
             <div class="gpu-model-item">
               <span class="gpu-model-name">
                 <span class="legend-swatch" style="--seg-color:${entry.color};"></span>
-                ${escapeHtml(entry.modelId)}
+                ${escapeHtml(entry.displayName)}
               </span>
               <span>${formatGiB(entry.bytes)} GiB</span>
             </div>`,
@@ -635,9 +652,10 @@ function renderContainers(items) {
   }
 
   items.forEach((container) => {
+    const instanceId = getInstanceId(container);
     const tr = document.createElement("tr");
     tr.appendChild(makeCell("Name", container.name));
-    tr.appendChild(makeCell("Model", container.model_id));
+    tr.appendChild(makeCell("Model", `${container.model_id} #${instanceId}`));
     tr.appendChild(makeStatusCell("Status", container.status));
     tr.appendChild(makeCell("Port", String(container.host_port ?? "-")));
     tr.appendChild(makeCell("GPU", String(container.gpu_index ?? "-")));
@@ -650,20 +668,25 @@ function renderContainers(items) {
       makeButton("Stop", "small-warning", async () => {
         try {
           notify(
-            `Stopping ${container.model_id}...`,
+            `Stopping ${container.model_id} #${instanceId}...`,
             "warning",
             "Stop requested",
           );
-          setStatus(`Stopping ${container.model_id}...`, "ok");
+          setStatus(`Stopping ${container.model_id} #${instanceId}...`, "ok");
           await api("/api/stop", {
             method: "POST",
             body: JSON.stringify({
               model_id: container.model_id,
+              container_name: container.name,
               purge_cache: false,
             }),
           });
-          notify(`Stopped ${container.model_id}.`, "success", "Model stopped");
-          setStatus(`Stopped ${container.model_id}.`, "ok");
+          notify(
+            `Stopped ${container.model_id} #${instanceId}.`,
+            "success",
+            "Model stopped",
+          );
+          setStatus(`Stopped ${container.model_id} #${instanceId}.`, "ok");
           await refreshAll();
         } catch (error) {
           notify(`Stop failed: ${error.message}`, "error", "Stop failed", 6500);

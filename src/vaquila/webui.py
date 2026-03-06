@@ -27,7 +27,12 @@ from vaquila.cli_helpers import (
 from vaquila.commands import run as run_command_module
 from vaquila.commands.run import cmd_run
 from vaquila.config import CONFIG
-from vaquila.docker_service import get_container, list_managed_containers, stop_model_container
+from vaquila.docker_service import (
+    get_container,
+    list_managed_containers,
+    stop_containers_by_name,
+    stop_model_container,
+)
 from vaquila.exceptions import VaquilaError
 from vaquila.gpu import read_all_gpu_snapshots, read_gpu_snapshot
 from vaquila.inference import run_inference
@@ -69,6 +74,7 @@ class StopRequest(BaseModel):
     """Stop request payload."""
 
     model_id: str = Field(min_length=1)
+    container_name: str | None = None
     purge_cache: bool = False
 
 
@@ -441,6 +447,7 @@ def create_web_app() -> FastAPI:
                     {
                         "name": row.name,
                         "model_id": row.model_id,
+                        "instance_id": row.instance_id,
                         "used_bytes": row.gpu_used_bytes,
                     }
                 )
@@ -592,10 +599,17 @@ def create_web_app() -> FastAPI:
 
     @app.post("/api/stop")
     def stop_model(payload: StopRequest) -> dict[str, object]:
-        """Stop one model and optionally purge cache."""
+        """Stop one container instance (or all instances for a model) and optionally purge cache."""
         removed_names: list[str] = []
         try:
-            removed_names = stop_model_container(payload.model_id)
+            if payload.container_name:
+                removed_names = stop_containers_by_name([payload.container_name])
+                if not removed_names:
+                    raise VaquilaError(
+                        f"No container found for `{payload.container_name}`."
+                    )
+            else:
+                removed_names = stop_model_container(payload.model_id)
         except VaquilaError as exc:
             if not payload.purge_cache:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
