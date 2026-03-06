@@ -58,28 +58,21 @@ At launch, `vaq run` asks (with defaults):
 - tool call parser (default none)
 - reasoning parser (default none)
 - enable thinking (default true)
+- quantization strategy (default `auto`)
+- KV cache dtype (`fp16` or `fp8`)
 
 You can also pass them directly as CLI options for non-interactive usage.
-vAquila applies the minimum GPU ratio required by your runtime settings (instead of grabbing the maximum VRAM).
+vAquila computes a VRAM-aware initial GPU ratio from your runtime settings and model profile (weights + KV cache estimate + overhead).
 If requested settings exceed available VRAM, launch is refused before starting vLLM.
-If KV cache is still insufficient at startup, vAquila auto-tries a few higher ratio steps until the smallest viable ratio is found.
-vAquila also validates `max-model-len` against the model config when available (cache HF first, then Hub).
-If requested context exceeds model limit, vAquila now proposes a choice:
+If KV cache is still insufficient at startup, vAquila adjusts ratio with data-driven retries using vLLM error metrics (`needed GiB` / `available KV cache memory`) to converge faster.
+vAquila also validates `max-model-len` against model config when available (HF cache first, then Hub).
+If requested context exceeds model limit, vAquila proposes:
 
 - optimize with long-context override (risky, sets `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1`),
 - or automatically clamp to model limit.
 
-By default, `vaq run` now waits for startup readiness and displays a live startup indicator (download/load phases from vLLM logs).
+By default, `vaq run` waits for startup readiness and shows a live startup indicator (download/load phases parsed from vLLM logs).
 You can tune startup waiting with `--startup-timeout 1200`.
-When launching a model on a GPU already in use, vAquila asks for confirmation before enabling shared GPU rebalance.
-For non-interactive usage, pass `--share-gpu` to allow shared launch explicitly.
-Use `--min-shared-ratio` (default `0.25`) to fail fast before vLLM startup when shared VRAM would be too low.
-
-Manual rebalance of already running models on one GPU:
-
-```bash
-docker compose run --rm vaq rebalance --gpu 0 --min-shared-ratio 0.25
-```
 
 List managed containers:
 
@@ -120,7 +113,7 @@ docker compose run --rm vaq doctor --gpu 0
 Test model inference:
 
 ```bash
-docker compose run --rm vaq infer Qwen/Qwen3-0.6B "Dis bonjour en français"
+docker compose run --rm vaq infer Qwen/Qwen3-0.6B "Say hello in English"
 ```
 
 ### Windows note
@@ -131,20 +124,20 @@ On Docker Desktop (Linux containers), prefer a daemon-readable Linux-style path 
 
 ```text
 src/vaquila/
-├─ cli.py             # Entry point Typer (routing des commandes)
-├─ cli_commands.py    # Façade de compatibilité vers les modules de commandes
-├─ cli_helpers.py     # Façade de compatibilité vers les modules helpers
+├─ cli.py             # Typer CLI entrypoint (command routing)
+├─ cli_commands.py    # Compatibility facade for command modules
+├─ cli_helpers.py     # Compatibility facade for helper modules
 ├─ commands/
-│  ├─ run.py          # Orchestration de lancement `vaq run`
-│  ├─ system.py       # `ps`, `stop`, `rebalance`, `doctor`, `infer`
+│  ├─ run.py          # `vaq run` launch orchestration and GPU ratio tuning
+│  ├─ system.py       # `ps`, `stop`, `doctor`, `infer`
 │  └─ cache.py        # `list`, `rm`
 ├─ helpers/
-│  ├─ startup.py      # Parsing logs startup + attente readiness
-│  ├─ runtime.py      # Heuristiques ratio + prompts runtime
-│  ├─ cache.py        # Cache HF + résolution limites contexte
-│  ├─ context.py      # Stratégie dépassement contexte
-│  ├─ rebalance.py    # Plans/rebalance multi-modèles
-│  └─ types.py        # Dataclasses partagées (LaunchPlan)
+│  ├─ startup.py      # Startup log parsing + readiness waiting
+│  ├─ runtime.py      # Ratio heuristics + runtime prompts
+│  ├─ cache.py        # HF cache helpers + context limit resolution
+│  ├─ context.py      # Long-context strategy
+│  ├─ rebalance.py    # Legacy multi-model rebalance helpers
+│  └─ types.py        # Shared dataclasses (LaunchPlan)
 ├─ config.py          # Runtime configuration
 ├─ docker_service.py  # Docker SDK orchestration
 ├─ gpu.py             # NVML GPU memory checks
@@ -156,6 +149,8 @@ src/vaquila/
 ### Current MVP behavior
 
 - Auto VRAM ratio calculation from NVML with safety buffer
+- Profile-informed initial ratio (model config + quantization + KV cache estimate)
+- KV-aware tuning from vLLM runtime errors (`needed` vs `available` KV cache memory)
 - Graceful CLI errors (Docker daemon / NVIDIA unavailable)
 - Hugging Face cache mounted from `~/.cache/huggingface` to `/root/.cache/huggingface`
 - vAquila-managed containers labeled for `ps` and `stop` workflows

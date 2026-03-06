@@ -1,4 +1,4 @@
-"""Services Docker pour l'orchestration des conteneurs vLLM."""
+"""Docker services for vLLM container orchestration."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from vaquila.models import GpuSnapshot, ManagedContainer
 
 
 def _sanitize_model_id(model_id: str) -> str:
-    """Sanitize un model id pour générer un nom de conteneur lisible."""
+    """Sanitize a model ID to build a readable container name."""
     return (
         model_id.lower()
         .replace("/", "-")
@@ -27,12 +27,12 @@ def _sanitize_model_id(model_id: str) -> str:
 
 
 def build_container_name(model_id: str) -> str:
-    """Construit le nom standard d'un conteneur managé par vAquila."""
+    """Build the standard name for a vAquila-managed container."""
     return f"vaq-{_sanitize_model_id(model_id)}"
 
 
 def _next_container_name(client: docker.DockerClient, model_id: str) -> str:
-    """Retourne un nom de conteneur unique pour une instance de modèle."""
+    """Return a unique container name for a model instance."""
     base_name = build_container_name(model_id)
 
     try:
@@ -51,46 +51,46 @@ def _next_container_name(client: docker.DockerClient, model_id: str) -> str:
 
 
 def _docker_client() -> docker.DockerClient:
-    """Retourne un client Docker en validant la connexion démon."""
+    """Return a Docker client after validating daemon connectivity."""
     try:
         client = docker.from_env()
         client.ping()
         return client
     except DockerException as exc:
         raise VaquilaError(
-            "Daemon Docker inaccessible. Démarre Docker Desktop (ou le daemon) puis réessaie."
+            "Docker daemon is unreachable. Start Docker Desktop (or the daemon) and try again."
         ) from exc
 
 
 def check_docker_connection() -> None:
-    """Valide que la connexion au daemon Docker est opérationnelle."""
+    """Validate that the Docker daemon connection is operational."""
     _docker_client()
 
 
 def get_container(container_name: str) -> Container:
-    """Retourne un conteneur par son nom avec gestion d'erreur métier."""
+    """Return a container by name with domain-level error handling."""
     client = _docker_client()
     try:
         return client.containers.get(container_name)
     except NotFound as exc:
-        raise VaquilaError(f"Conteneur introuvable: {container_name}") from exc
+        raise VaquilaError(f"Container not found: {container_name}") from exc
     except DockerException as exc:
-        raise VaquilaError(f"Impossible de récupérer le conteneur {container_name}: {exc}") from exc
+        raise VaquilaError(f"Unable to retrieve container {container_name}: {exc}") from exc
 
 
 def _ensure_cache_dir(path: Path) -> Path:
-    """Crée le dossier de cache Hugging Face local s'il n'existe pas."""
+    """Create the local Hugging Face cache directory if it does not exist."""
     raw = str(path)
     is_windows_host_abs = bool(re.match(r"^[A-Za-z]:[\\/]", raw))
 
     if is_windows_host_abs:
-        # Le chemin est destiné au daemon Docker hôte (Windows), pas au conteneur vaq.
+        # Path targets the host Docker daemon (Windows), not the vaq container.
         return path
 
     if not path.is_absolute():
         raise VaquilaError(
-            "VAQ_HF_CACHE_HOST_PATH doit être un chemin absolu lisible par Docker daemon. "
-            "Exemple Windows: C:/Users/<user>/GitRepository/vAquila/tmp/huggingface"
+            "VAQ_HF_CACHE_HOST_PATH must be an absolute path readable by the Docker daemon. "
+            "Windows example: C:/Users/<user>/GitRepository/vAquila/tmp/huggingface"
         )
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -109,8 +109,10 @@ def run_model_container(
     required_ratio: float,
     allow_long_context_override: bool,
     config: RuntimeConfig,
+    quantization: str | None = None,
+    kv_cache_dtype: str | None = None,
 ) -> Container:
-    """Crée et démarre un conteneur vLLM pour un modèle HF."""
+    """Create and start a vLLM container for a Hugging Face model."""
     client = _docker_client()
 
     name = _next_container_name(client, model_id)
@@ -131,6 +133,10 @@ def run_model_container(
             command.extend(["--tool-call-parser", tool_call_parser])
         if reasoning_parser:
             command.extend(["--reasoning-parser", reasoning_parser])
+        if quantization:
+            command.extend(["--quantization", quantization])
+        if kv_cache_dtype:
+            command.extend(["--kv-cache-dtype", kv_cache_dtype])
 
         environment = {"NVIDIA_VISIBLE_DEVICES": str(gpu_index)}
         if allow_long_context_override:
@@ -165,15 +171,17 @@ def run_model_container(
                 "com.vaquila.enable_thinking": "true" if enable_thinking else "false",
                 "com.vaquila.required_ratio": f"{required_ratio:.3f}",
                 "com.vaquila.allow_long_context_override": "true" if allow_long_context_override else "false",
+                "com.vaquila.quantization": quantization or "",
+                "com.vaquila.kv_cache_dtype": kv_cache_dtype or "",
             },
         )
         return container
     except DockerException as exc:
-        raise VaquilaError(f"Impossible de lancer le conteneur vLLM: {exc}") from exc
+        raise VaquilaError(f"Unable to start vLLM container: {exc}") from exc
 
 
 def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = None) -> list[ManagedContainer]:
-    """Liste les conteneurs gérés par vAquila."""
+    """List containers managed by vAquila."""
     client = _docker_client()
     containers = client.containers.list(all=True, filters={"label": "com.vaquila.managed=true"})
     rows: list[ManagedContainer] = []
@@ -282,7 +290,7 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
 
 
 def stop_model_container(model_id: str) -> list[str]:
-    """Stoppe et supprime toutes les instances de conteneur d'un model id."""
+    """Stop and remove all container instances for a model ID."""
     client = _docker_client()
     containers = client.containers.list(
         all=True,
@@ -294,7 +302,7 @@ def stop_model_container(model_id: str) -> list[str]:
             maybe = client.containers.get(candidate_name)
             containers = [maybe]
         except NotFound:
-            raise VaquilaError(f"Aucun conteneur trouvé pour le modèle `{model_id}`.")
+            raise VaquilaError(f"No container found for model `{model_id}`.")
 
     removed_names: list[str] = []
     for container in containers:
@@ -304,13 +312,13 @@ def stop_model_container(model_id: str) -> list[str]:
             container.remove(v=True)
             removed_names.append(container.name)
         except DockerException as exc:
-            raise VaquilaError(f"Échec de suppression du conteneur {container.name}: {exc}") from exc
+            raise VaquilaError(f"Failed to remove container {container.name}: {exc}") from exc
 
     return removed_names
 
 
 def stop_containers_by_name(container_names: list[str]) -> list[str]:
-    """Stoppe et supprime une liste de conteneurs par nom."""
+    """Stop and remove a list of containers by name."""
     client = _docker_client()
     removed_names: list[str] = []
 
@@ -320,7 +328,7 @@ def stop_containers_by_name(container_names: list[str]) -> list[str]:
         except NotFound:
             continue
         except DockerException as exc:
-            raise VaquilaError(f"Impossible de récupérer le conteneur {container_name}: {exc}") from exc
+            raise VaquilaError(f"Unable to retrieve container {container_name}: {exc}") from exc
 
         try:
             if container.status == "running":
@@ -328,6 +336,6 @@ def stop_containers_by_name(container_names: list[str]) -> list[str]:
             container.remove(v=True)
             removed_names.append(container.name)
         except DockerException as exc:
-            raise VaquilaError(f"Échec de suppression du conteneur {container.name}: {exc}") from exc
+            raise VaquilaError(f"Failed to remove container {container.name}: {exc}") from exc
 
     return removed_names

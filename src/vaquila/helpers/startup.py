@@ -1,4 +1,4 @@
-"""Helpers startup vLLM et parsing de logs."""
+"""vLLM startup helpers and log parsing utilities."""
 
 from __future__ import annotations
 
@@ -17,16 +17,16 @@ _READY_MARKERS = (
 )
 
 _DOWNLOAD_PHASE_MARKERS: tuple[tuple[str, str], ...] = (
-    ("snapshot_download", "Téléchargement des poids Hugging Face..."),
-    ("hf_hub_download", "Téléchargement des fichiers modèle..."),
-    ("download_weights_from_hf", "Téléchargement des poids modèle..."),
-    ("file_download", "Téléchargement des artefacts..."),
+    ("snapshot_download", "Downloading Hugging Face weights..."),
+    ("hf_hub_download", "Downloading model files..."),
+    ("download_weights_from_hf", "Downloading model weights..."),
+    ("file_download", "Downloading artifacts..."),
 )
 
 _LOAD_PHASE_MARKERS: tuple[tuple[str, str], ...] = (
-    ("Starting to load model", "Chargement du modèle en VRAM..."),
-    ("Resolved architecture", "Architecture modèle détectée..."),
-    ("Initializing a V1 LLM engine", "Initialisation du moteur vLLM..."),
+    ("Starting to load model", "Loading model into VRAM..."),
+    ("Resolved architecture", "Model architecture detected..."),
+    ("Initializing a V1 LLM engine", "Initializing vLLM engine..."),
 )
 
 _HF_PROGRESS_RE = re.compile(r"(\d{1,3})%\s+Completed\s+\|\s*(\d+)/(\d+)")
@@ -36,17 +36,17 @@ _KV_CONCURRENCY_RE = re.compile(
 
 
 def clean_log_line(line: str) -> str:
-    """Nettoie un préfixe de log vLLM pour affichage CLI."""
+    """Clean a vLLM log prefix for CLI display."""
     cleaned = re.sub(r"^\([^)]*\)\s*", "", line).strip()
     return cleaned
 
 
 def extract_startup_hint(log_text: str) -> str:
-    """Retourne un message de progression lisible à partir des logs vLLM."""
+    """Return a readable startup progress hint from vLLM logs."""
     progress_matches = _HF_PROGRESS_RE.findall(log_text)
     if progress_matches:
         percent, current, total = progress_matches[-1]
-        return f"Chargement des poids (shards): {percent}% ({current}/{total})"
+        return f"Loading weights (shards): {percent}% ({current}/{total})"
 
     for marker, message in _DOWNLOAD_PHASE_MARKERS:
         if marker in log_text:
@@ -60,15 +60,15 @@ def extract_startup_hint(log_text: str) -> str:
     for line in reversed(lines):
         cleaned = clean_log_line(line)
         if "ERROR" in cleaned:
-            return f"Erreur détectée: {cleaned[:140]}"
+            return f"Error detected: {cleaned[:140]}"
         if any(token in cleaned for token in ("INFO", "WARNING", "Starting", "loading", "download")):
             return cleaned[:140]
 
-    return "Démarrage du serveur vLLM..."
+    return "Starting vLLM server..."
 
 
 def extract_root_error(log_text: str) -> str | None:
-    """Extrait une cause racine utile depuis les logs de startup."""
+    """Extract a useful root cause from startup logs."""
     lines = [line.strip() for line in log_text.splitlines() if line.strip()]
 
     disk_error_tokens = (
@@ -101,7 +101,7 @@ def extract_root_error(log_text: str) -> str | None:
 
 
 def extract_kv_max_concurrency(log_text: str, request_tokens: int) -> float | None:
-    """Extrait la concurrence max KV observée pour un contexte donné."""
+    """Extract observed KV max concurrency for a given context size."""
     matches = _KV_CONCURRENCY_RE.findall(log_text)
     if not matches:
         return None
@@ -120,9 +120,9 @@ def extract_kv_max_concurrency(log_text: str, request_tokens: int) -> float | No
 
 
 def wait_until_model_ready(console: Console, container_name: str, timeout_seconds: int = 900) -> None:
-    """Suit les logs de startup vLLM et attend que l'API soit prête."""
+    """Follow vLLM startup logs and wait until the API is ready."""
     started = time.monotonic()
-    last_hint = "Démarrage du serveur vLLM..."
+    last_hint = "Starting vLLM server..."
 
     with console.status(f"[cyan]{last_hint}[/cyan]", spinner="dots") as status:
         while time.monotonic() - started < timeout_seconds:
@@ -133,8 +133,8 @@ def wait_until_model_ready(console: Console, container_name: str, timeout_second
 
             if not log_text.strip():
                 hint = (
-                    "Préparation du runtime vLLM... "
-                    f"({elapsed}s, premier lancement = téléchargement Hugging Face possible)"
+                    "Preparing vLLM runtime... "
+                    f"({elapsed}s, first launch may trigger Hugging Face downloads)"
                 )
             else:
                 hint = extract_startup_hint(log_text)
@@ -149,17 +149,17 @@ def wait_until_model_ready(console: Console, container_name: str, timeout_second
             if runtime_container.status in {"exited", "dead"}:
                 root_error = extract_root_error(log_text)
                 detail = (
-                    f" Cause probable: {root_error}"
+                    f" Probable cause: {root_error}"
                     if root_error
-                    else " Consulte les logs du conteneur pour la cause détaillée."
+                    else " Check container logs for detailed root cause."
                 )
                 raise VaquilaError(
-                    f"Le conteneur `{container_name}` s'est arrêté pendant l'initialisation.{detail}"
+                    f"Container `{container_name}` stopped during initialization.{detail}"
                 )
 
             time.sleep(2)
 
     raise VaquilaError(
-        f"Timeout de démarrage ({timeout_seconds}s). Le modèle est peut-être encore en téléchargement. "
-        f"Suis les logs: docker logs -f {container_name}"
+        f"Startup timeout ({timeout_seconds}s). The model may still be downloading. "
+        f"Follow logs: docker logs -f {container_name}"
     )

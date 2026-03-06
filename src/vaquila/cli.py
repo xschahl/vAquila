@@ -1,4 +1,4 @@
-"""Entrée CLI principale de vAquila."""
+"""vAquila main CLI entrypoint."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from vaquila.cli_commands import (
     cmd_infer,
     cmd_list_models,
     cmd_ps,
-    cmd_rebalance,
     cmd_rm_model,
     cmd_run,
     cmd_stop,
@@ -21,167 +20,133 @@ app = typer.Typer(help="vAquila - Orchestration vLLM + Docker")
 
 @app.command("list")
 def list_models() -> None:
-    """Liste les modèles présents dans le cache Hugging Face local."""
+    """List models available in the local Hugging Face cache."""
     cmd_list_models()
 
 
 @app.command("rm")
 def rm_model(
-    model_id: str = typer.Argument(..., help="Model id Hugging Face à supprimer du cache"),
+    model_id: str = typer.Argument(..., help="Hugging Face model id to remove from cache"),
 ) -> None:
-    """Supprime un modèle du cache Hugging Face local."""
+    """Remove a model from the local Hugging Face cache."""
     cmd_rm_model(model_id)
 
 
 @app.command("run")
 def run(
-    model_id: str = typer.Argument(..., help="Model id Hugging Face, ex: meta-llama/Llama-3-8B-Instruct"),
-    port: int = typer.Option(CONFIG.default_host_port, "--port", "-p", help="Port hôte exposé"),
-    gpu_index: int = typer.Option(0, "--gpu", help="Index GPU NVIDIA"),
+    model_id: str = typer.Argument(..., help="Hugging Face model id, e.g. meta-llama/Llama-3-8B-Instruct"),
+    port: int = typer.Option(CONFIG.default_host_port, "--port", "-p", help="Exposed host port"),
+    gpu_index: int = typer.Option(0, "--gpu", help="NVIDIA GPU index"),
     buffer_gb: float = typer.Option(
         None,
         "--buffer-gb",
-        help="Buffer VRAM en Gio réservé pour l'OS/processus tiers (optionnel, auto selon OS)",
+        help="VRAM safety buffer in GiB reserved for OS/other processes (optional, auto by OS)",
     ),
     startup_timeout: int = typer.Option(
         900,
         "--startup-timeout",
-        help="Timeout en secondes pour l'initialisation du modèle",
-    ),
-    rebalance_existing: bool = typer.Option(
-        True,
-        "--rebalance-existing/--no-rebalance-existing",
-        help="Rééquilibre automatiquement les modèles déjà lancés sur ce GPU pour faire de la place",
-    ),
-    min_shared_ratio: float = typer.Option(
-        0.25,
-        "--min-shared-ratio",
-        help="Ratio minimum par modèle en mode partagé (pré-check avant lancement vLLM)",
+        help="Model startup timeout in seconds",
     ),
     max_num_seqs: int | None = typer.Option(
         None,
         "--max-num-seqs",
-        help="Nombre de requêtes en parallèle (défaut: 1)",
+        help="Maximum parallel requests (default: 1)",
     ),
     max_model_len: int | None = typer.Option(
         None,
         "--max-model-len",
-        help="Contexte par utilisateur en tokens (défaut: 16384)",
+        help="Per-request context length in tokens (default: 16384)",
     ),
     tool_call_parser: str | None = typer.Option(
         None,
         "--tool-call-parser",
-        help="Tool call parser vLLM (défaut: aucun)",
+        help="vLLM tool call parser (default: none)",
     ),
     reasoning_parser: str | None = typer.Option(
         None,
         "--reasoning-parser",
-        help="Reasoning parser vLLM (défaut: aucun)",
+        help="vLLM reasoning parser (default: none)",
     ),
     enable_thinking: bool | None = typer.Option(
         None,
         "--enable-thinking/--disable-thinking",
-        help="Active/désactive le mode thinking (si absent: question interactive, défaut=true)",
+        help="Enable/disable thinking mode (if omitted: interactive prompt, default=true)",
     ),
     allow_long_context_override: bool | None = typer.Option(
         None,
         "--allow-long-context-override/--no-allow-long-context-override",
-        help="Autorise le dépassement de la limite de contexte modèle (risqué). Si absent: question au besoin.",
+        help="Allow context length above model limit (risky). If omitted: interactive prompt when needed.",
     ),
-    share_gpu: bool = typer.Option(
-        False,
-        "--share-gpu",
-        help="Autorise explicitement le mode partagé multi-modèles sur le même GPU",
+    quantization: str = typer.Option(
+        "auto",
+        "--quantization",
+        help="vLLM quantization (auto, none, fp8, awq, gptq...).",
+    ),
+    kv_cache_dtype: str | None = typer.Option(
+        None,
+        "--kv-cache-dtype",
+        help="KV cache dtype: fp16 or fp8 (if omitted: interactive prompt)",
     ),
 ) -> None:
-    """Lance un modèle dans un conteneur vLLM en arrière-plan."""
+    """Launch a model in a background vLLM container."""
     cmd_run(
         model_id=model_id,
         port=port,
         gpu_index=gpu_index,
         buffer_gb=buffer_gb,
         startup_timeout=startup_timeout,
-        rebalance_existing=rebalance_existing,
-        min_shared_ratio=min_shared_ratio,
         max_num_seqs=max_num_seqs,
         max_model_len=max_model_len,
         tool_call_parser=tool_call_parser,
         reasoning_parser=reasoning_parser,
         enable_thinking=enable_thinking,
         allow_long_context_override=allow_long_context_override,
-        share_gpu=share_gpu,
+        quantization=quantization,
+        kv_cache_dtype=kv_cache_dtype,
     )
 
 
 @app.command("ps")
 def ps() -> None:
-    """Liste les conteneurs vAquila actifs et leurs infos runtime."""
+    """List active vAquila containers and runtime details."""
     cmd_ps()
 
 
 @app.command("stop")
 def stop(
-    model_id: str = typer.Argument(..., help="Model id Hugging Face à arrêter"),
+    model_id: str = typer.Argument(..., help="Hugging Face model id to stop"),
     purge_cache: bool = typer.Option(
         False,
         "--purge-cache",
-        help="Supprime aussi le cache local Hugging Face du modèle après arrêt",
+        help="Also remove the model local Hugging Face cache after stop",
     ),
 ) -> None:
-    """Stoppe et supprime le conteneur lié au modèle."""
+    """Stop and remove the container linked to a model."""
     cmd_stop(model_id=model_id, purge_cache=purge_cache)
-
-
-@app.command("rebalance")
-def rebalance(
-    gpu_index: int = typer.Option(0, "--gpu", help="Index GPU NVIDIA à rééquilibrer"),
-    buffer_gb: float = typer.Option(
-        None,
-        "--buffer-gb",
-        help="Buffer VRAM en Gio réservé pour l'OS/processus tiers (optionnel, auto selon OS)",
-    ),
-    startup_timeout: int = typer.Option(
-        900,
-        "--startup-timeout",
-        help="Timeout en secondes pour l'initialisation des modèles",
-    ),
-    min_shared_ratio: float = typer.Option(
-        0.25,
-        "--min-shared-ratio",
-        help="Ratio minimum par modèle en mode partagé (pré-check avant lancement vLLM)",
-    ),
-) -> None:
-    """Rééquilibre les modèles déjà lancés sur un GPU en les relançant avec un ratio partagé."""
-    cmd_rebalance(
-        gpu_index=gpu_index,
-        buffer_gb=buffer_gb,
-        startup_timeout=startup_timeout,
-        min_shared_ratio=min_shared_ratio,
-    )
 
 
 @app.command("doctor")
 def doctor(
-    gpu_index: int = typer.Option(0, "--gpu", help="Index GPU NVIDIA à vérifier"),
+    gpu_index: int = typer.Option(0, "--gpu", help="NVIDIA GPU index to validate"),
 ) -> None:
-    """Vérifie l'environnement d'exécution (Docker, GPU, cache)."""
+    """Validate runtime environment (Docker, GPU, cache)."""
     cmd_doctor(gpu_index=gpu_index)
 
 
 @app.command("infer")
 def infer(
-    model_id: str = typer.Argument(..., help="Model id ciblé par l'appel chat completion"),
-    prompt: str = typer.Argument(..., help="Prompt utilisateur à envoyer au modèle"),
+    model_id: str = typer.Argument(..., help="Model id used for the chat completion call"),
+    prompt: str = typer.Argument(..., help="User prompt sent to the model"),
     base_url: str = typer.Option(
         CONFIG.inference_base_url,
         "--base-url",
-        help="Base URL de l'API OpenAI-compatible vLLM",
+        help="Base URL of the vLLM OpenAI-compatible API",
     ),
-    max_tokens: int = typer.Option(128, "--max-tokens", help="Nombre maximal de tokens générés"),
-    temperature: float = typer.Option(0.2, "--temperature", help="Température d'échantillonnage"),
-    timeout: int = typer.Option(120, "--timeout", help="Timeout HTTP en secondes"),
+    max_tokens: int = typer.Option(128, "--max-tokens", help="Maximum number of generated tokens"),
+    temperature: float = typer.Option(0.2, "--temperature", help="Sampling temperature"),
+    timeout: int = typer.Option(120, "--timeout", help="HTTP timeout in seconds"),
 ) -> None:
-    """Teste l'inférence d'un modèle déjà lancé via l'API vLLM."""
+    """Test inference against an already running model through the vLLM API."""
     cmd_infer(
         model_id=model_id,
         prompt=prompt,

@@ -1,4 +1,4 @@
-"""Services d'appel HTTP à l'API vLLM OpenAI-compatible."""
+"""HTTP call services for the OpenAI-compatible vLLM API."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from vaquila.exceptions import VaquilaError
 
 
 def _sanitize_model_output(text: str) -> str:
-    """Supprime les balises de raisonnement éventuelles pour un rendu utilisateur propre."""
+    """Remove optional reasoning tags for clean user output."""
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     cleaned = cleaned.strip()
     return cleaned if cleaned else text.strip()
@@ -25,11 +25,11 @@ def run_inference(
     temperature: float,
     timeout_seconds: int,
 ) -> str:
-    """Exécute une requête de chat completion et renvoie la réponse assistant."""
+    """Run a chat completion request and return the assistant response."""
     if max_tokens <= 0:
-        raise VaquilaError("max_tokens doit être supérieur à 0.")
+        raise VaquilaError("max_tokens must be greater than 0.")
     if timeout_seconds <= 0:
-        raise VaquilaError("timeout doit être supérieur à 0.")
+        raise VaquilaError("timeout must be greater than 0.")
 
     endpoint = f"{base_url.rstrip('/')}/v1/chat/completions"
     payload = {
@@ -53,25 +53,25 @@ def run_inference(
             response_data = response.read().decode("utf-8")
     except HTTPError as exc:
         details = exc.read().decode("utf-8", errors="replace")
-        raise VaquilaError(f"Échec API vLLM ({exc.code}): {details}") from exc
+        raise VaquilaError(f"vLLM API request failed ({exc.code}): {details}") from exc
     except URLError as exc:
         raise VaquilaError(
-            f"Impossible de joindre l'API vLLM sur {base_url}. Vérifie le modèle, le port et l'URL."
+            f"Unable to reach vLLM API at {base_url}. Verify model, port, and URL."
         ) from exc
 
     try:
         json_payload = json.loads(response_data)
     except json.JSONDecodeError as exc:
-        raise VaquilaError("Réponse API invalide: JSON illisible.") from exc
+        raise VaquilaError("Invalid API response: unreadable JSON.") from exc
 
     choices = json_payload.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise VaquilaError("Réponse API invalide: champ `choices` manquant.")
+        raise VaquilaError("Invalid API response: missing `choices` field.")
 
     first_choice = choices[0]
     message = first_choice.get("message") if isinstance(first_choice, dict) else None
     if not isinstance(message, dict):
-        raise VaquilaError("Réponse API invalide: champ `message` manquant.")
+        raise VaquilaError("Invalid API response: missing `message` field.")
 
     content = message.get("content")
     if isinstance(content, str):
@@ -85,4 +85,4 @@ def run_inference(
         if text_parts:
             return _sanitize_model_output("".join(text_parts))
 
-    raise VaquilaError("Réponse API invalide: contenu assistant vide.")
+    raise VaquilaError("Invalid API response: assistant content is empty.")

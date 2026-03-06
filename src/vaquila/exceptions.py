@@ -1,5 +1,5 @@
-"""Exceptions métier vAquila."""
+"""vAquila domain exceptions."""
 
 
 class VaquilaError(Exception):
-    """Erreur fonctionnelle remontée à l'utilisateur CLI."""
+    """Domain-level error surfaced to CLI users."""

@@ -1,4 +1,4 @@
-"""Helpers cache Hugging Face et résolution de limites de contexte."""
+"""Hugging Face cache helpers and context-limit resolution."""
 
 from __future__ import annotations
 
@@ -15,36 +15,36 @@ from vaquila.exceptions import VaquilaError
 
 
 def format_gb(value_bytes: int | None) -> str:
-    """Affiche des octets en Gio lisibles."""
+    """Render bytes as a readable GiB value."""
     if value_bytes is None:
         return "n/a"
-    return f"{value_bytes / (1024**3):.2f} Gio"
+    return f"{value_bytes / (1024**3):.2f} GiB"
 
 
 def check_hf_cache_path() -> str:
-    """Vérifie que le cache Hugging Face est accessible en lecture/écriture."""
+    """Check that the Hugging Face cache is readable and writable."""
     path = CONFIG.hf_cache_host_path
     path.mkdir(parents=True, exist_ok=True)
 
     if not path.is_dir():
-        raise VaquilaError(f"Le chemin de cache n'est pas un dossier: {path}")
+        raise VaquilaError(f"Cache path is not a directory: {path}")
 
     readable = os.access(path, os.R_OK)
     writable = os.access(path, os.W_OK)
     if not readable or not writable:
-        raise VaquilaError(f"Permissions insuffisantes sur le cache: {path} (read={readable}, write={writable})")
+        raise VaquilaError(f"Insufficient cache permissions: {path} (read={readable}, write={writable})")
 
     return str(path)
 
 
 def model_cache_repo_dir(model_id: str) -> str:
-    """Construit le nom de dossier repo Hugging Face dans le cache local."""
+    """Build the Hugging Face repo directory name in local cache."""
     normalized = model_id.strip().replace("/", "--")
     return f"models--{normalized}"
 
 
 def extract_model_context_limit(config_payload: dict[str, object]) -> int | None:
-    """Extrait la limite de contexte depuis un config.json HF."""
+    """Extract context limit from a Hugging Face `config.json`."""
     candidate_keys = (
         "max_position_embeddings",
         "model_max_length",
@@ -60,7 +60,7 @@ def extract_model_context_limit(config_payload: dict[str, object]) -> int | None
 
 
 def hub_cache_root() -> Path:
-    """Retourne la racine du cache hub Hugging Face lisible depuis le runtime CLI."""
+    """Return the Hugging Face hub cache root readable by the CLI runtime."""
     configured = CONFIG.hf_cache_host_path / "hub"
     mounted = Path("/root/.cache/huggingface/hub")
 
@@ -81,7 +81,7 @@ def hub_cache_root() -> Path:
 
 
 def read_cached_model_config(model_id: str) -> dict[str, object] | None:
-    """Lit le config.json depuis le cache local HF si disponible."""
+    """Read `config.json` from local Hugging Face cache when available."""
     repo_dir = hub_cache_root() / model_cache_repo_dir(model_id)
     if not repo_dir.exists():
         return None
@@ -110,7 +110,7 @@ def read_cached_model_config(model_id: str) -> dict[str, object] | None:
 
 
 def fetch_remote_model_config(model_id: str) -> dict[str, object] | None:
-    """Récupère config.json depuis Hugging Face Hub en fallback réseau."""
+    """Fetch `config.json` from Hugging Face Hub as a network fallback."""
     url = f"https://huggingface.co/{model_id}/resolve/main/config.json"
     try:
         with urlopen(url, timeout=10) as response:
@@ -129,7 +129,7 @@ def fetch_remote_model_config(model_id: str) -> dict[str, object] | None:
 
 
 def resolve_model_context_limit(model_id: str) -> int | None:
-    """Résout la limite de contexte modèle depuis cache HF puis réseau."""
+    """Resolve model context limit from HF cache first, then network."""
     cached_payload = read_cached_model_config(model_id)
     if cached_payload is not None:
         cached_limit = extract_model_context_limit(cached_payload)
@@ -143,8 +143,16 @@ def resolve_model_context_limit(model_id: str) -> int | None:
     return None
 
 
+def resolve_model_config(model_id: str) -> dict[str, object] | None:
+    """Resolve model `config.json` from local cache, then Hugging Face Hub."""
+    cached_payload = read_cached_model_config(model_id)
+    if cached_payload is not None:
+        return cached_payload
+    return fetch_remote_model_config(model_id)
+
+
 def cache_dir_to_model_id(cache_dir: Path) -> str:
-    """Convertit un dossier cache HF en model_id lisible."""
+    """Convert a Hugging Face cache directory to a readable model ID."""
     name = cache_dir.name
     if not name.startswith("models--"):
         return name
@@ -152,7 +160,7 @@ def cache_dir_to_model_id(cache_dir: Path) -> str:
 
 
 def dir_size_bytes(path: Path) -> int:
-    """Calcule la taille totale d'un dossier."""
+    """Compute total directory size in bytes."""
     total = 0
     for file_path in path.rglob("*"):
         if file_path.is_file():
@@ -162,7 +170,7 @@ def dir_size_bytes(path: Path) -> int:
 
 
 def list_cached_model_dirs() -> list[Path]:
-    """Liste les dossiers de modèles présents dans le cache local."""
+    """List model directories present in local cache."""
     root = hub_cache_root()
     if not root.exists():
         return []
@@ -170,7 +178,7 @@ def list_cached_model_dirs() -> list[Path]:
 
 
 def purge_model_cache(model_id: str) -> bool:
-    """Supprime le cache local d'un modèle Hugging Face si présent."""
+    """Remove local cache for a Hugging Face model if present."""
     cache_root = hub_cache_root()
     target = cache_root / model_cache_repo_dir(model_id)
 

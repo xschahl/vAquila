@@ -1,4 +1,4 @@
-"""Configuration runtime de vAquila."""
+"""vAquila runtime configuration."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    """Paramètres de runtime pour le lancement de conteneurs vLLM."""
+    """Runtime settings for launching vLLM containers."""
 
     image: str = "vllm/vllm-openai:latest"
     default_host_port: int = 8000
@@ -19,14 +19,14 @@ class RuntimeConfig:
 
 
 def _default_inference_base_url() -> str:
-    """Retourne l'URL API par défaut selon le contexte d'exécution."""
+    """Return the default API URL based on execution context."""
     if Path("/.dockerenv").exists():
         return "http://host.docker.internal:8000"
     return "http://localhost:8000"
 
 
 def load_config() -> RuntimeConfig:
-    """Charge la configuration runtime depuis l'environnement."""
+    """Load runtime configuration from environment variables."""
     image = os.getenv("VAQ_VLLM_IMAGE", "vllm/vllm-openai:latest")
     default_host_port = int(os.getenv("VAQ_DEFAULT_HOST_PORT", "8000"))
     security_vram_buffer_gb = float(os.getenv("VAQ_SECURITY_VRAM_BUFFER_GB", "1.5"))

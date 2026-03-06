@@ -1,4 +1,4 @@
-"""Types partagés pour la CLI."""
+"""Shared type definitions for the CLI."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class LaunchPlan:
-    """Plan de lancement vLLM pour un modèle."""
+    """vLLM launch plan for a model."""
 
     model_id: str
     host_port: int

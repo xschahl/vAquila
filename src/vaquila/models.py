@@ -1,4 +1,4 @@
-"""Modèles de données internes pour l'orchestration."""
+"""Internal data models for orchestration."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class GpuSnapshot:
-    """Snapshot mémoire d'un GPU NVIDIA."""
+    """Memory snapshot for an NVIDIA GPU."""
 
     index: int
     total_bytes: int
@@ -17,7 +17,7 @@ class GpuSnapshot:
 
 @dataclass(frozen=True)
 class ManagedContainer:
-    """Projection d'un conteneur vAquila affichée par la commande `ps`."""
+    """vAquila container projection displayed by the `ps` command."""
 
     name: str
     model_id: str

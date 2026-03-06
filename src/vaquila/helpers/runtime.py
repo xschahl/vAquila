@@ -1,14 +1,17 @@
-"""Helpers de résolution runtime et heuristiques de ratio GPU."""
+"""Runtime resolution helpers and GPU ratio heuristics."""
 
 from __future__ import annotations
 
+import re
+
 import typer
 
+from vaquila.helpers.cache import resolve_model_config
 from vaquila.exceptions import VaquilaError
 
 
 def normalize_optional_text(value: str | None) -> str | None:
-    """Normalise une chaîne optionnelle (vide -> None)."""
+    """Normalize an optional text field (empty -> None)."""
     if value is None:
         return None
     normalized = value.strip()
@@ -21,8 +24,12 @@ def estimate_required_ratio(
     tool_call_parser: str | None,
     reasoning_parser: str | None,
     enable_thinking: bool,
+    kv_cache_dtype: str = "fp16",
+    quantization: str | None = None,
+    model_id: str | None = None,
+    total_vram_gb: float | None = None,
 ) -> float:
-    """Estime un ratio GPU minimal requis selon la configuration runtime demandée."""
+    """Estimate the minimum GPU ratio required by runtime settings."""
     context_factor = max_model_len / 16384
     ratio = 0.02
     ratio += 0.001 * max_num_seqs
@@ -33,21 +40,242 @@ def estimate_required_ratio(
         ratio += 0.002
     if enable_thinking:
         ratio += 0.001
+
+    if kv_cache_dtype == "fp8":
+        ratio *= 0.78
+
+    quantization_factor = {
+        "fp8": 0.82,
+        "awq": 0.72,
+        "gptq": 0.72,
+        "bitsandbytes": 0.75,
+        "marlin": 0.75,
+    }
+    if quantization:
+        ratio *= quantization_factor.get(quantization, 0.90)
+
+    if model_id and total_vram_gb and total_vram_gb > 0:
+        analytic_ratio = estimate_required_ratio_from_model_profile(
+            model_id=model_id,
+            max_num_seqs=max_num_seqs,
+            max_model_len=max_model_len,
+            kv_cache_dtype=kv_cache_dtype,
+            quantization=quantization,
+            total_vram_gb=total_vram_gb,
+        )
+        if analytic_ratio is not None:
+            ratio = max(ratio, analytic_ratio)
+
     return max(0.02, min(ratio, 0.90))
 
 
+def estimate_required_ratio_from_model_profile(
+    model_id: str,
+    max_num_seqs: int,
+    max_model_len: int,
+    kv_cache_dtype: str,
+    quantization: str | None,
+    total_vram_gb: float,
+) -> float | None:
+    """Estimate GPU ratio from model profile (weights + KV cache + runtime overhead)."""
+    payload = resolve_model_config(model_id)
+    if not isinstance(payload, dict):
+        return None
+
+    hidden_size = _read_positive_int(payload, "hidden_size", "d_model", "n_embd")
+    num_layers = _read_positive_int(payload, "num_hidden_layers", "n_layer")
+    num_heads = _read_positive_int(payload, "num_attention_heads", "n_head")
+    num_kv_heads = _read_positive_int(payload, "num_key_value_heads", "num_kv_heads")
+    vocab_size = _read_positive_int(payload, "vocab_size")
+
+    if hidden_size is None or num_layers is None:
+        return None
+
+    if num_heads is None or num_heads <= 0:
+        num_heads = 1
+    if num_kv_heads is None or num_kv_heads <= 0:
+        num_kv_heads = num_heads
+
+    head_dim = max(1, hidden_size // num_heads)
+    kv_bytes_per_elem = 1 if kv_cache_dtype == "fp8" else 2
+
+    kv_cache_bytes = (
+        2
+        * num_layers
+        * num_kv_heads
+        * head_dim
+        * max_model_len
+        * max_num_seqs
+        * kv_bytes_per_elem
+    )
+    kv_cache_gb = (kv_cache_bytes / (1024**3)) * 1.15
+
+    estimated_params = _estimate_parameter_count(hidden_size, num_layers, vocab_size)
+    weight_bytes_per_param = _bytes_per_param_for_quantization(quantization)
+    weights_gb = (estimated_params * weight_bytes_per_param) / (1024**3)
+
+    runtime_overhead_gb = max(0.9, weights_gb * 0.10)
+    estimated_total_gb = weights_gb + kv_cache_gb + runtime_overhead_gb
+
+    ratio = estimated_total_gb / total_vram_gb
+    return max(0.02, min(ratio, 0.95))
+
+
+def _read_positive_int(payload: dict[str, object], *keys: str) -> int | None:
+    """Read a strictly positive integer from multiple possible keys."""
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, (int, float)) and int(value) > 0:
+            return int(value)
+    return None
+
+
+def _estimate_parameter_count(hidden_size: int, num_layers: int, vocab_size: int | None) -> float:
+    """Estimate parameter count for a decoder-only LLM from config values."""
+    transformer_params = 12.0 * num_layers * (hidden_size**2)
+    embedding_params = 0.0
+    if vocab_size and vocab_size > 0:
+        embedding_params = 2.0 * vocab_size * hidden_size
+    return transformer_params + embedding_params
+
+
+def _bytes_per_param_for_quantization(quantization: str | None) -> float:
+    """Approximate bytes-per-parameter in memory by quantization mode."""
+    if not quantization:
+        return 2.0
+
+    q = quantization.lower()
+    if q == "fp8":
+        return 1.0
+    if q in {"awq", "gptq", "marlin"}:
+        return 0.62
+    if q in {"bitsandbytes", "bnb", "int8"}:
+        return 1.0
+    return 1.4
+
+
+def resolve_kv_cache_dtype(kv_cache_dtype: str | None) -> str:
+    """Resolve KV cache dtype (fp16/fp8) from option or interactive prompt."""
+    if kv_cache_dtype is None:
+        choice = typer.prompt(
+            "KV cache dtype [fp16/fp8]",
+            default="fp16",
+            show_default=True,
+        ).strip().lower()
+    else:
+        choice = kv_cache_dtype.strip().lower()
+
+    if choice not in {"fp16", "fp8"}:
+        raise VaquilaError("--kv-cache-dtype must be `fp16` or `fp8`.")
+
+    return choice
+
+
+def resolve_quantization_strategy(model_id: str, quantization: str | None) -> tuple[str | None, str]:
+    """Resolve vLLM quantization: explicit value, none, or auto from model config."""
+    requested = (quantization or "auto").strip().lower()
+    if requested in {"", "auto"}:
+        return _infer_quantization_from_model(model_id)
+    if requested in {"none", "no", "false"}:
+        return None, "none (disabled)"
+    if requested == "fp4":
+        return "awq", "awq (fp4 mapping)"
+    return requested, requested
+
+
+def _infer_quantization_from_model(model_id: str) -> tuple[str | None, str]:
+    """Infer likely quantization (FP8/4-bit) from model config and model id."""
+    model_id_l = model_id.lower()
+    payload = resolve_model_config(model_id)
+
+    if isinstance(payload, dict):
+        quant_cfg = payload.get("quantization_config")
+        if isinstance(quant_cfg, dict):
+            quant_method = quant_cfg.get("quant_method") or quant_cfg.get("quantization_method")
+            if isinstance(quant_method, str) and quant_method.strip():
+                method = quant_method.strip().lower()
+                if method == "fp4":
+                    return "awq", "awq (auto from fp4 config)"
+                return method, f"{method} (auto from config)"
+
+            bits = quant_cfg.get("bits")
+            if isinstance(bits, (int, float)):
+                bit_value = int(bits)
+                if bit_value <= 4:
+                    return "awq", "awq (auto 4-bit)"
+                if bit_value == 8:
+                    return "fp8", "fp8 (auto 8-bit)"
+
+            if quant_cfg.get("load_in_4bit") is True:
+                return "awq", "awq (auto load_in_4bit)"
+
+        torch_dtype = payload.get("torch_dtype")
+        if isinstance(torch_dtype, str) and "float8" in torch_dtype.lower():
+            return "fp8", "fp8 (auto torch_dtype)"
+
+    fp8_tokens = ("fp8", "float8")
+    fp4_tokens = ("fp4", "int4", "4bit", "awq", "gptq")
+    if any(token in model_id_l for token in fp8_tokens):
+        return "fp8", "fp8 (auto from model id)"
+    if any(token in model_id_l for token in fp4_tokens):
+        if "gptq" in model_id_l:
+            return "gptq", "gptq (auto from model id)"
+        return "awq", "awq (auto from model id)"
+
+    return None, "none (auto: no quantization detected)"
+
+
 def is_retryable_vram_error(message: str) -> bool:
-    """Détecte une erreur vLLM qui justifie une montée de ratio."""
+    """Detect vLLM errors that justify increasing GPU ratio."""
     patterns = (
         "No available memory for the cache blocks",
         "Free memory on device",
         "less than desired GPU memory utilization",
+        "available KV cache memory",
+        "Try increasing `gpu_memory_utilization`",
+        "estimated maximum model length",
     )
     return any(pattern in message for pattern in patterns)
 
 
+def extract_kv_cache_memory_bounds(message: str) -> tuple[float, float] | None:
+    """Extract (needed_gib, available_gib) from a vLLM KV cache error message."""
+    pattern = re.compile(
+        r"\(([0-9]+(?:\.[0-9]+)?)\s*GiB\s*KV cache is needed,\s*"
+        r"which is larger than the available KV cache memory\s*"
+        r"\(([0-9]+(?:\.[0-9]+)?)\s*GiB\)",
+        re.IGNORECASE,
+    )
+    match = pattern.search(message)
+    if not match:
+        return None
+
+    needed = float(match.group(1))
+    available = float(match.group(2))
+    if needed <= 0 or available <= 0:
+        return None
+    return needed, available
+
+
+def suggest_ratio_from_kv_cache_error(
+    failed_ratio: float,
+    message: str,
+    safety_margin: float = 1.06,
+) -> float | None:
+    """Suggest a minimum ratio from KV cache error metrics (needed/available)."""
+    bounds = extract_kv_cache_memory_bounds(message)
+    if bounds is None:
+        return None
+
+    needed_gib, available_gib = bounds
+    suggested = failed_ratio * (needed_gib / available_gib) * safety_margin
+    if suggested <= 0:
+        return None
+    return suggested
+
+
 def ratio_candidates(min_ratio: float, max_ratio: float) -> list[float]:
-    """Génère des paliers de ratio entre minimum requis et maximum disponible."""
+    """Generate ratio steps between required minimum and available maximum."""
     if min_ratio > max_ratio:
         return []
 
@@ -72,19 +300,19 @@ def resolve_run_runtime_settings(
     reasoning_parser: str | None,
     enable_thinking: bool | None,
 ) -> tuple[int, int, str | None, str | None, bool]:
-    """Résout les paramètres runtime via options ou prompts interactifs."""
+    """Resolve runtime parameters from options or interactive prompts."""
     resolved_max_num_seqs = max_num_seqs
     if resolved_max_num_seqs is None:
-        resolved_max_num_seqs = typer.prompt("Nombre de requêtes en parallèle (max-num-seqs)", default=1, type=int)
+        resolved_max_num_seqs = typer.prompt("Parallel requests (max-num-seqs)", default=1, type=int)
 
     resolved_max_model_len = max_model_len
     if resolved_max_model_len is None:
-        resolved_max_model_len = typer.prompt("Contexte par utilisateur (max-model-len)", default=16384, type=int)
+        resolved_max_model_len = typer.prompt("Per-request context length (max-model-len)", default=16384, type=int)
 
     resolved_tool_call_parser = normalize_optional_text(tool_call_parser)
     if tool_call_parser is None:
         prompted_tool_call_parser = typer.prompt(
-            "Tool call parser (laisser vide = aucun)",
+            "Tool call parser (leave empty = none)",
             default="",
             show_default=False,
         )
@@ -93,7 +321,7 @@ def resolve_run_runtime_settings(
     resolved_reasoning_parser = normalize_optional_text(reasoning_parser)
     if reasoning_parser is None:
         prompted_reasoning_parser = typer.prompt(
-            "Reasoning parser (laisser vide = aucun)",
+            "Reasoning parser (leave empty = none)",
             default="",
             show_default=False,
         )
@@ -101,12 +329,12 @@ def resolve_run_runtime_settings(
 
     resolved_enable_thinking = enable_thinking
     if resolved_enable_thinking is None:
-        resolved_enable_thinking = typer.confirm("Activer le thinking ?", default=True)
+        resolved_enable_thinking = typer.confirm("Enable thinking mode?", default=True)
 
     if resolved_max_num_seqs <= 0:
-        raise VaquilaError("max-num-seqs doit être supérieur à 0.")
+        raise VaquilaError("max-num-seqs must be greater than 0.")
     if resolved_max_model_len <= 0:
-        raise VaquilaError("max-model-len doit être supérieur à 0.")
+        raise VaquilaError("max-model-len must be greater than 0.")
 
     return (
         resolved_max_num_seqs,

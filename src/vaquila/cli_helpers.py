@@ -1,4 +1,4 @@
-"""Façade de compatibilité pour les helpers CLI vAquila."""
+"""Compatibility facade for vAquila CLI helper utilities."""
 
 from vaquila.helpers.cache import (
     cache_dir_to_model_id,
@@ -12,6 +12,7 @@ from vaquila.helpers.cache import (
     model_cache_repo_dir,
     purge_model_cache,
     read_cached_model_config,
+    resolve_model_config,
     resolve_model_context_limit,
 )
 from vaquila.helpers.context import resolve_context_strategy
@@ -23,10 +24,14 @@ from vaquila.helpers.rebalance import (
 )
 from vaquila.helpers.runtime import (
     estimate_required_ratio,
+    extract_kv_cache_memory_bounds,
     is_retryable_vram_error,
     normalize_optional_text,
     ratio_candidates,
+    resolve_kv_cache_dtype,
+    resolve_quantization_strategy,
     resolve_run_runtime_settings,
+    suggest_ratio_from_kv_cache_error,
 )
 from vaquila.helpers.startup import (
     clean_log_line,
@@ -46,6 +51,7 @@ __all__ = [
     "dir_size_bytes",
     "estimate_required_ratio",
     "estimate_shared_ratio_before_rebalance",
+    "extract_kv_cache_memory_bounds",
     "extract_kv_max_concurrency",
     "extract_model_context_limit",
     "extract_root_error",
@@ -61,9 +67,13 @@ __all__ = [
     "purge_model_cache",
     "ratio_candidates",
     "read_cached_model_config",
+    "resolve_model_config",
+    "resolve_kv_cache_dtype",
+    "resolve_quantization_strategy",
     "rebalance_and_start",
     "resolve_context_strategy",
     "resolve_model_context_limit",
     "resolve_run_runtime_settings",
+    "suggest_ratio_from_kv_cache_error",
     "wait_until_model_ready",
 ]

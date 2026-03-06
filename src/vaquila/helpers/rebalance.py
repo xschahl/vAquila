@@ -1,4 +1,4 @@
-"""Helpers de rééquilibrage multi-modèles."""
+"""Multi-model rebalancing helper utilities."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from vaquila.models import GpuSnapshot, ManagedContainer
 
 
 def launch_plan_from_container(container: ManagedContainer) -> LaunchPlan:
-    """Construit un plan de relance depuis un conteneur déjà géré par vAquila."""
+    """Build a relaunch plan from an existing vAquila-managed container."""
     if container.host_port is None:
-        raise VaquilaError(f"Port introuvable pour {container.name}, impossible de rééquilibrer.")
+        raise VaquilaError(f"Port not found for {container.name}; unable to rebalance.")
 
     max_num_seqs = container.max_num_seqs or 1
     max_model_len = container.max_model_len or 16384
@@ -51,25 +51,25 @@ def launch_plan_from_container(container: ManagedContainer) -> LaunchPlan:
 
 
 def compute_shared_ratio(snapshot: GpuSnapshot, buffer_gb: float, model_count: int) -> tuple[float, float]:
-    """Calcule un ratio partagé pour lancer plusieurs modèles sur le même GPU."""
+    """Compute a shared ratio to launch multiple models on the same GPU."""
     if model_count <= 0:
-        raise VaquilaError("Le nombre de modèles à répartir doit être >= 1.")
+        raise VaquilaError("Number of models to distribute must be >= 1.")
 
     buffer_bytes = int(buffer_gb * (1024**3))
     usable_bytes = snapshot.free_bytes - buffer_bytes
     if usable_bytes <= 0:
         free_gb = snapshot.free_bytes / (1024**3)
         raise VaquilaError(
-            f"VRAM insuffisante pour un lancement partagé: {free_gb:.2f} Gio libres, "
-            f"buffer demandé {buffer_gb:.2f} Gio."
+            f"Insufficient VRAM for shared launch: {free_gb:.2f} GiB free, "
+            f"requested buffer {buffer_gb:.2f} GiB."
         )
 
     shared_raw = (usable_bytes / snapshot.total_bytes) / model_count
     minimum_ratio = 0.03
     if shared_raw < minimum_ratio:
         raise VaquilaError(
-            f"VRAM insuffisante pour {model_count} modèles simultanés sur ce GPU "
-            f"(ratio partagé estimé={shared_raw:.3f})."
+            f"Insufficient VRAM for {model_count} simultaneous models on this GPU "
+            f"(estimated shared ratio={shared_raw:.3f})."
         )
 
     return min(shared_raw, 0.98), buffer_gb
@@ -81,9 +81,9 @@ def estimate_shared_ratio_before_rebalance(
     target_model_count: int,
     running_models: list[ManagedContainer],
 ) -> float:
-    """Estime un ratio partagé réaliste avant de relancer des modèles."""
+    """Estimate a realistic shared ratio before relaunching models."""
     if target_model_count <= 0:
-        raise VaquilaError("Le nombre de modèles à répartir doit être >= 1.")
+        raise VaquilaError("Number of models to distribute must be >= 1.")
 
     buffer_ratio = (buffer_gb * (1024**3)) / snapshot.total_bytes
     used_ratio = snapshot.used_bytes / snapshot.total_bytes
@@ -105,19 +105,19 @@ def rebalance_and_start(
     min_shared_ratio: float,
     startup_timeout: int,
 ) -> tuple[float, list[tuple[str, int, str]]]:
-    """Rééquilibre la VRAM entre plusieurs modèles puis les relance."""
+    """Rebalance VRAM across multiple models, then relaunch them."""
     if not plans:
-        raise VaquilaError("Aucun modèle à lancer pour le rééquilibrage.")
+        raise VaquilaError("No model to launch for rebalancing.")
 
     ports = [plan.host_port for plan in plans]
     if len(set(ports)) != len(ports):
-        raise VaquilaError("Conflit de ports détecté pendant le rééquilibrage.")
+        raise VaquilaError("Port conflict detected during rebalancing.")
 
     existing_names = [plan.existing_name for plan in plans if plan.existing_name]
     removed = stop_containers_by_name(existing_names)
     if removed:
         console.print(
-            "[yellow]⚠️ Rééquilibrage GPU: conteneurs stoppés temporairement: "
+            "[yellow]⚠️ GPU rebalancing: containers stopped temporarily: "
             f"{', '.join(removed)}[/yellow]"
         )
 
@@ -127,20 +127,20 @@ def rebalance_and_start(
     target_min_ratio = max(min_shared_ratio, max_required_ratio)
     if max_available_shared_ratio < target_min_ratio:
         raise VaquilaError(
-            "Rééquilibrage refusé: capacité VRAM insuffisante pour la configuration demandée. "
-            f"Ratio max dispo={max_available_shared_ratio:.3f}, ratio requis={target_min_ratio:.3f}."
+            "Rebalancing refused: insufficient VRAM capacity for requested configuration. "
+            f"max_available_ratio={max_available_shared_ratio:.3f}, required_ratio={target_min_ratio:.3f}."
         )
 
     shared_ratio = target_min_ratio
     console.print(
-        "[cyan]Répartition VRAM multi-modèles activée: "
-        f"{len(plans)} modèle(s), ratio appliqué={shared_ratio:.3f} (max dispo={max_available_shared_ratio:.3f})[/cyan]"
+        "[cyan]Multi-model VRAM sharing enabled: "
+        f"{len(plans)} model(s), applied_ratio={shared_ratio:.3f} (max_available={max_available_shared_ratio:.3f})[/cyan]"
     )
 
     started: list[tuple[str, int, str]] = []
     for plan in plans:
         with console.status(
-            f"[cyan]Lancement {plan.model_id} sur le port {plan.host_port} (ratio {shared_ratio:.3f})...[/cyan]",
+            f"[cyan]Launching {plan.model_id} on port {plan.host_port} (ratio {shared_ratio:.3f})...[/cyan]",
             spinner="dots",
         ):
             container = run_model_container(
