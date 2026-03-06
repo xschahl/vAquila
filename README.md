@@ -1,5 +1,9 @@
 # 🦅 vAquila
 
+<p align="center">
+	<img src="src/vaquila/assets/logo-base.png" alt="vAquila logo" width="160" />
+</p>
+
 > **The Ollama developer experience, the vLLM production power.**
 
 **vAquila** (accessible via the `vaq` command) is an open-source AI model inference manager. It combines the absolute simplicity of a CLI with the production performance of **vLLM** and the isolation of **Docker**, all with smart and automated GPU management.
@@ -18,7 +22,7 @@ vAquila orchestrates everything for you. Like an eagle soaring over your infrast
 - [x] **Auto-VRAM**: Automatic calculation of the `--gpu-memory-utilization` flag via NVML to prevent crashes.
 - [x] **One-Click Deployment**: Download and run models via a simple `vaq run <hf-model>` command.
 - [x] **Docker Orchestration**: Invisible management of containers, exposed ports, and Hugging Face cache.
-- [ ] **Web UI**: A local dashboard to monitor active models and live GPU usage.
+- [x] **Web UI**: A local dashboard to manage models, containers, cache, and inference.
 
 ## 🚀 Quickstart (Docker-first MVP)
 
@@ -116,6 +120,14 @@ Test model inference:
 docker compose run --rm vaq infer Qwen/Qwen3-0.6B "Say hello in English"
 ```
 
+Start the local Web UI:
+
+```bash
+docker compose run --rm -p 8787:8787 vaq ui --host 0.0.0.0 --port 8787
+```
+
+Then open `http://localhost:8787` in your browser.
+
 ### Windows note
 
 On Docker Desktop (Linux containers), prefer a daemon-readable Linux-style path in `.env` for `VAQ_HF_CACHE_HOST_PATH`.
@@ -155,6 +167,7 @@ src/vaquila/
 - Hugging Face cache mounted from `~/.cache/huggingface` to `/root/.cache/huggingface`
 - vAquila-managed containers labeled for `ps` and `stop` workflows
 - `ps` reads NVML snapshots across detected GPUs for consistent VRAM reporting
+- Local Web UI for launch, monitoring, stop/remove, and inference workflows
 
 ### Containerization files
 

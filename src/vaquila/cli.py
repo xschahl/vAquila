@@ -12,6 +12,7 @@ from vaquila.cli_commands import (
     cmd_rm_model,
     cmd_run,
     cmd_stop,
+    cmd_ui,
 )
 from vaquila.config import CONFIG
 
@@ -155,3 +156,12 @@ def infer(
         temperature=temperature,
         timeout=timeout,
     )
+
+
+@app.command("ui")
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host interface for the local Web UI server"),
+    port: int = typer.Option(8787, "--port", help="Web UI HTTP port"),
+) -> None:
+    """Start the local Web UI for managing models and containers."""
+    cmd_ui(host=host, port=port)
