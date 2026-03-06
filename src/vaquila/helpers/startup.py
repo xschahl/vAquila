@@ -6,6 +6,7 @@ import re
 import time
 from contextlib import suppress
 
+from docker.errors import DockerException, NotFound
 from rich.console import Console
 
 from vaquila.docker_service import get_container
@@ -123,13 +124,28 @@ def wait_until_model_ready(console: Console, container_name: str, timeout_second
     """Follow vLLM startup logs and wait until the API is ready."""
     started = time.monotonic()
     last_hint = "Starting vLLM server..."
+    last_log_text = ""
 
     with console.status(f"[cyan]{last_hint}[/cyan]", spinner="dots") as status:
         while time.monotonic() - started < timeout_seconds:
             elapsed = int(time.monotonic() - started)
-            runtime_container = get_container(container_name)
-            runtime_container.reload()
-            log_text = runtime_container.logs(tail=250).decode("utf-8", errors="replace")
+            try:
+                runtime_container = get_container(container_name)
+                runtime_container.reload()
+                log_text = runtime_container.logs(tail=250).decode("utf-8", errors="replace")
+                last_log_text = log_text
+            except VaquilaError as exc:
+                root_error = extract_root_error(last_log_text)
+                detail = f" Last known root cause: {root_error}" if root_error else ""
+                raise VaquilaError(
+                    f"Container `{container_name}` disappeared during initialization.{detail}"
+                ) from exc
+            except (NotFound, DockerException) as exc:
+                root_error = extract_root_error(last_log_text)
+                detail = f" Last known root cause: {root_error}" if root_error else ""
+                raise VaquilaError(
+                    f"Container `{container_name}` became unavailable during initialization.{detail}"
+                ) from exc
 
             if not log_text.strip():
                 hint = (

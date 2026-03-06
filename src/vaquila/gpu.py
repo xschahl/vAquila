@@ -9,6 +9,7 @@ from pynvml import (
     nvmlDeviceGetCount,
     nvmlDeviceGetHandleByIndex,
     nvmlDeviceGetMemoryInfo,
+    nvmlDeviceGetName,
     nvmlInit,
     nvmlShutdown,
 )
@@ -28,8 +29,11 @@ def read_gpu_snapshot(index: int = 0) -> GpuSnapshot:
         nvmlInit()
         handle = nvmlDeviceGetHandleByIndex(index)
         memory = nvmlDeviceGetMemoryInfo(handle)
+        raw_name = nvmlDeviceGetName(handle)
+        gpu_name = raw_name.decode("utf-8", errors="replace") if isinstance(raw_name, bytes) else str(raw_name)
         return GpuSnapshot(
             index=index,
+            name=gpu_name,
             total_bytes=int(memory.total),
             free_bytes=int(memory.free),
             used_bytes=int(memory.used),
@@ -55,8 +59,11 @@ def read_all_gpu_snapshots() -> dict[int, GpuSnapshot]:
         for index in range(gpu_count):
             handle = nvmlDeviceGetHandleByIndex(index)
             memory = nvmlDeviceGetMemoryInfo(handle)
+            raw_name = nvmlDeviceGetName(handle)
+            gpu_name = raw_name.decode("utf-8", errors="replace") if isinstance(raw_name, bytes) else str(raw_name)
             snapshots[index] = GpuSnapshot(
                 index=index,
+                name=gpu_name,
                 total_bytes=int(memory.total),
                 free_bytes=int(memory.free),
                 used_bytes=int(memory.used),

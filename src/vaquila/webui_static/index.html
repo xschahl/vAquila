@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>vAquila Control Center</title>
+    <link rel="icon" type="image/png" href="/assets/logo-base.png" />
+    <link rel="stylesheet" href="/webui/styles.css" />
+  </head>
+  <body>
+    <div class="shell"></div>
+    <div class="atmo-lines" aria-hidden="true"></div>
+    <div class="atmo-orb" aria-hidden="true"></div>
+    <div id="notification-center" aria-live="polite" aria-atomic="false"></div>
+    <main class="app-shell">
+      <header class="hero-card">
+        <div class="hero-brand">
+          <div class="brand-emblem">
+            <div class="logo-frame">
+              <img
+                class="brand-mark brand-light"
+                src="/assets/logo-light.png"
+                alt="vAquila logo"
+              />
+              <img
+                class="brand-mark brand-dark"
+                src="/assets/logo-dark.png"
+                alt="vAquila logo"
+              />
+            </div>
+            <div class="brand-meta">
+              <span class="brand-name">vAquila</span>
+              <span class="brand-tag">AI model orchestration</span>
+            </div>
+          </div>
+          <div class="hero-copy">
+            <span class="eyebrow">Local AI operations</span>
+            <h1>vAquila Control Center</h1>
+            <p>
+              Operate your local vLLM runtime with confidence: launch models,
+              monitor VRAM, inspect logs, and validate inference from one
+              reliable control surface.
+            </p>
+            <div class="hero-actions">
+              <span class="auto-refresh-pill"
+                >Auto-refresh every 6 seconds</span
+              >
+              <span class="hint"
+                >FastAPI local UI for Docker + vLLM workflows</span
+              >
+            </div>
+          </div>
+        </div>
+        <div class="status-ribbon">
+          <div class="status-pill">
+            <span class="dot"></span
+            ><span id="status-health">Service online</span>
+          </div>
+          <div class="status-actions">
+            <button
+              type="button"
+              id="theme-toggle"
+              class="theme-toggle"
+              aria-label="Toggle color theme"
+            >
+              Light mode
+            </button>
+            <div id="toast" class="status-text">Ready.</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="stats-grid">
+        <article class="metric-card accent-blue">
+          <span class="metric-label">Managed containers</span>
+          <strong class="metric-value" id="stat-containers">0</strong>
+          <span class="metric-foot">All vAquila containers</span>
+        </article>
+        <article class="metric-card accent-green">
+          <span class="metric-label">Running now</span>
+          <strong class="metric-value" id="stat-running">0</strong>
+          <span class="metric-foot">Currently serving requests</span>
+        </article>
+        <article class="metric-card accent-purple">
+          <span class="metric-label">Cached models</span>
+          <strong class="metric-value" id="stat-cache">0</strong>
+          <span class="metric-foot">Ready from local HF cache</span>
+        </article>
+        <article class="metric-card accent-gold">
+          <span class="metric-label">Run tasks</span>
+          <strong class="metric-value" id="stat-tasks">0</strong>
+          <span class="metric-foot">Background launch tracking</span>
+        </article>
+      </section>
+
+      <section class="panel gpu-panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Capacity overview</span>
+            <h2>GPU utilization</h2>
+          </div>
+          <span class="panel-meta" id="gpu-summary"
+            >Detecting GPU status...</span
+          >
+        </div>
+        <div class="gpu-grid" id="gpu-grid"></div>
+      </section>
+
+      <div class="workspace-grid">
+        <div class="column-stack">
+          <section class="panel panel-form">
+            <div class="panel-head compact">
+              <div>
+                <span class="eyebrow">Deployment</span>
+                <h2>Run model</h2>
+              </div>
+              <span class="panel-meta"
+                >Launch a vLLM container with explicit runtime knobs.</span
+              >
+            </div>
+            <form id="run-form" class="form-grid">
+              <div class="field span-2">
+                <label for="run-model-id">Model ID</label>
+                <input
+                  id="run-model-id"
+                  name="model_id"
+                  required
+                  placeholder="Qwen/Qwen3-0.6B"
+                />
+              </div>
+              <div class="field">
+                <label for="run-port">Port</label
+                ><input
+                  id="run-port"
+                  name="port"
+                  type="number"
+                  value="8000"
+                  min="1"
+                  max="65535"
+                />
+              </div>
+              <div class="field">
+                <label for="run-gpu-index">GPU index</label
+                ><input
+                  id="run-gpu-index"
+                  name="gpu_index"
+                  type="number"
+                  value="0"
+                  min="0"
+                />
+              </div>
+              <div class="field">
+                <label for="run-buffer-gb">Buffer (GiB)</label
+                ><input
+                  id="run-buffer-gb"
+                  name="buffer_gb"
+                  type="number"
+                  step="0.1"
+                  placeholder="Optional"
+                />
+              </div>
+              <div class="field">
+                <label for="run-startup-timeout">Startup timeout (s)</label
+                ><input
+                  id="run-startup-timeout"
+                  name="startup_timeout"
+                  type="number"
+                  value="900"
+                  min="10"
+                />
+              </div>
+              <div class="field">
+                <label for="run-max-num-seqs">Max num seqs</label
+                ><input
+                  id="run-max-num-seqs"
+                  name="max_num_seqs"
+                  type="number"
+                  value="1"
+                  min="1"
+                />
+              </div>
+              <div class="field">
+                <label for="run-max-model-len">Max model len</label
+                ><input
+                  id="run-max-model-len"
+                  name="max_model_len"
+                  type="number"
+                  value="16384"
+                  min="1"
+                />
+              </div>
+              <div class="field">
+                <label for="run-quantization">Quantization</label
+                ><input
+                  id="run-quantization"
+                  name="quantization"
+                  value="auto"
+                />
+              </div>
+              <div class="field">
+                <label for="run-kv-dtype">KV cache dtype</label
+                ><select id="run-kv-dtype" name="kv_cache_dtype">
+                  <option value="auto" selected>auto</option>
+                  <option value="bfloat16">bfloat16</option>
+                  <option value="fp8">fp8</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="run-tool-parser">Tool call parser</label
+                ><input
+                  id="run-tool-parser"
+                  name="tool_call_parser"
+                  placeholder="Optional"
+                />
+              </div>
+              <div class="field">
+                <label for="run-reasoning-parser">Reasoning parser</label
+                ><input
+                  id="run-reasoning-parser"
+                  name="reasoning_parser"
+                  placeholder="Optional"
+                />
+              </div>
+              <div class="field">
+                <label for="run-thinking">Enable thinking</label
+                ><select id="run-thinking" name="enable_thinking">
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="run-long-context">Allow long context override</label
+                ><select
+                  id="run-long-context"
+                  name="allow_long_context_override"
+                >
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </div>
+              <div class="form-actions span-2">
+                <button type="submit">Launch model</button>
+                <span class="hint"
+                  >Tasks appear on the right and logs can be opened as a full
+                  console.</span
+                >
+              </div>
+            </form>
+          </section>
+
+          <section class="panel panel-form">
+            <div class="panel-head compact">
+              <div>
+                <span class="eyebrow">Validation</span>
+                <h2>Inference</h2>
+              </div>
+              <span class="panel-meta"
+                >Send a test prompt to a running OpenAI-compatible
+                endpoint.</span
+              >
+            </div>
+            <form id="infer-form" class="form-grid">
+              <div class="field span-2">
+                <label for="infer-target">Running model</label
+                ><select id="infer-target" name="infer_target" required>
+                  <option value="">No running model available</option>
+                </select>
+                <span class="field-help" id="infer-endpoint-hint"
+                  >Endpoint will be filled automatically from the selected
+                  container.</span
+                >
+              </div>
+              <div class="field">
+                <label for="infer-max-tokens">Max tokens</label
+                ><input
+                  id="infer-max-tokens"
+                  name="max_tokens"
+                  type="number"
+                  value="128"
+                  min="1"
+                />
+              </div>
+              <div class="field">
+                <label for="infer-temperature">Temperature</label
+                ><input
+                  id="infer-temperature"
+                  name="temperature"
+                  type="number"
+                  step="0.1"
+                  value="0.2"
+                />
+              </div>
+              <div class="field span-2">
+                <label for="infer-timeout">Timeout (s)</label
+                ><input
+                  id="infer-timeout"
+                  name="timeout"
+                  type="number"
+                  value="120"
+                  min="1"
+                />
+              </div>
+              <div class="field span-2">
+                <label for="infer-prompt">Prompt</label
+                ><textarea
+                  id="infer-prompt"
+                  name="prompt"
+                  required
+                  placeholder="Explain the current model status..."
+                ></textarea>
+              </div>
+              <div class="form-actions span-2">
+                <button type="submit">Run inference</button>
+              </div>
+            </form>
+            <div class="response-block">
+              <div class="response-head">
+                <span class="eyebrow">Output</span>
+                <span class="panel-meta">Latest inference response</span>
+              </div>
+              <pre id="infer-output">No inference executed yet.</pre>
+            </div>
+          </section>
+        </div>
+
+        <div class="column-stack">
+          <section class="panel">
+            <div class="panel-head compact">
+              <div>
+                <span class="eyebrow">Background jobs</span>
+                <h2>Run tasks</h2>
+              </div>
+              <span class="panel-meta"
+                >Track async launches and open both task and container
+                logs.</span
+              >
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Status</th>
+                    <th>Container</th>
+                    <th>Message</th>
+                    <th>Started</th>
+                    <th>Logs</th>
+                  </tr>
+                </thead>
+                <tbody id="tasks-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head compact">
+              <div>
+                <span class="eyebrow">Runtime state</span>
+                <h2>Containers</h2>
+              </div>
+              <span class="panel-meta"
+                >Stop, remove cache, or inspect logs from active
+                workloads.</span
+              >
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Model</th>
+                    <th>Status</th>
+                    <th>Port</th>
+                    <th>GPU</th>
+                    <th>Actions</th>
+                    <th>Logs</th>
+                  </tr>
+                </thead>
+                <tbody id="containers-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head compact">
+              <div>
+                <span class="eyebrow">Storage</span>
+                <h2>Cached models</h2>
+              </div>
+              <span class="panel-meta"
+                >Clean the local Hugging Face cache safely.</span
+              >
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Size (GiB)</th>
+                    <th>Path</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="cache-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <div class="logs-modal" id="logs-modal" aria-hidden="true">
+      <div class="logs-dialog">
+        <div class="logs-header">
+          <div>
+            <span class="eyebrow">Live execution output</span>
+            <h3 class="logs-title">Execution console</h3>
+            <span class="panel-meta mono" id="logs-target"
+              >No source selected</span
+            >
+          </div>
+          <div class="logs-actions">
+            <button type="button" class="ghost-button" id="logs-refresh">
+              Refresh logs
+            </button>
+            <button type="button" class="danger-button" id="logs-close">
+              Close
+            </button>
+          </div>
+        </div>
+        <pre id="logs-output">
+      Select task logs or container logs to open the console.</pre
+        >
+      </div>
+    </div>
+
+    <script src="/webui/app.js"></script>
+  </body>
+</html>

@@ -3,6 +3,7 @@
 from vaquila.commands.cache import cmd_list_models, cmd_rm_model
 from vaquila.commands.run import cmd_run
 from vaquila.commands.system import cmd_doctor, cmd_infer, cmd_ps, cmd_stop
+from vaquila.commands.ui import cmd_ui
 
 __all__ = [
     "cmd_list_models",
@@ -12,4 +13,5 @@ __all__ = [
     "cmd_stop",
     "cmd_doctor",
     "cmd_infer",
+    "cmd_ui",
 ]

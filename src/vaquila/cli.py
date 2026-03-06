@@ -12,6 +12,7 @@ from vaquila.cli_commands import (
     cmd_rm_model,
     cmd_run,
     cmd_stop,
+    cmd_ui,
 )
 from vaquila.config import CONFIG
 
@@ -85,7 +86,7 @@ def run(
     kv_cache_dtype: str | None = typer.Option(
         None,
         "--kv-cache-dtype",
-        help="KV cache dtype: fp16 or fp8 (if omitted: interactive prompt)",
+        help="KV cache dtype: auto, bfloat16, or fp8 (legacy fp16 is mapped to auto)",
     ),
 ) -> None:
     """Launch a model in a background vLLM container."""
@@ -155,3 +156,12 @@ def infer(
         temperature=temperature,
         timeout=timeout,
     )
+
+
+@app.command("ui")
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host interface for the local Web UI server"),
+    port: int = typer.Option(8787, "--port", help="Web UI HTTP port"),
+) -> None:
+    """Start the local Web UI for managing models and containers."""
+    cmd_ui(host=host, port=port)

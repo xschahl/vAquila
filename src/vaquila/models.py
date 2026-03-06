@@ -10,6 +10,7 @@ class GpuSnapshot:
     """Memory snapshot for an NVIDIA GPU."""
 
     index: int
+    name: str | None
     total_bytes: int
     free_bytes: int
     used_bytes: int
@@ -33,3 +34,4 @@ class ManagedContainer:
     enable_thinking: bool | None
     required_ratio: float | None
     allow_long_context_override: bool | None
+    instance_id: str | None = None
