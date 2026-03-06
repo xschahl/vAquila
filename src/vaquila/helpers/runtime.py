@@ -24,7 +24,7 @@ def estimate_required_ratio(
     tool_call_parser: str | None,
     reasoning_parser: str | None,
     enable_thinking: bool,
-    kv_cache_dtype: str = "fp16",
+    kv_cache_dtype: str = "auto",
     quantization: str | None = None,
     model_id: str | None = None,
     total_vram_gb: float | None = None,
@@ -155,20 +155,30 @@ def _bytes_per_param_for_quantization(quantization: str | None) -> float:
 
 
 def resolve_kv_cache_dtype(kv_cache_dtype: str | None) -> str:
-    """Resolve KV cache dtype (fp16/fp8) from option or interactive prompt."""
+    """Resolve a vLLM-compatible KV cache dtype from option or interactive prompt."""
     if kv_cache_dtype is None:
         choice = typer.prompt(
-            "KV cache dtype [fp16/fp8]",
-            default="fp16",
+            "KV cache dtype [auto/bfloat16/fp8]",
+            default="auto",
             show_default=True,
         ).strip().lower()
     else:
         choice = kv_cache_dtype.strip().lower()
 
-    if choice not in {"fp16", "fp8"}:
-        raise VaquilaError("--kv-cache-dtype must be `fp16` or `fp8`.")
+    aliases = {
+        "fp16": "auto",
+        "float16": "auto",
+        "bf16": "bfloat16",
+    }
+    resolved = aliases.get(choice, choice)
 
-    return choice
+    if resolved not in {"auto", "bfloat16", "fp8"}:
+        raise VaquilaError(
+            "--kv-cache-dtype must be `auto`, `bfloat16`, or `fp8` "
+            "(`fp16` is accepted as a legacy alias and mapped to `auto`)."
+        )
+
+    return resolved
 
 
 def resolve_quantization_strategy(model_id: str, quantization: str | None) -> tuple[str | None, str]:

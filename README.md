@@ -63,7 +63,7 @@ At launch, `vaq run` asks (with defaults):
 - reasoning parser (default none)
 - enable thinking (default true)
 - quantization strategy (default `auto`)
-- KV cache dtype (`fp16` or `fp8`)
+- KV cache dtype (`auto`, `bfloat16`, or `fp8`; legacy `fp16` is mapped to `auto`)
 
 You can also pass them directly as CLI options for non-interactive usage.
 vAquila computes a VRAM-aware initial GPU ratio from your runtime settings and model profile (weights + KV cache estimate + overhead).

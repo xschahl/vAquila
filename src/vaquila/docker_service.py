@@ -120,7 +120,6 @@ def run_model_container(
 
     try:
         command = [
-            "--model",
             model_id,
             "--gpu-memory-utilization",
             f"{gpu_utilization:.3f}",

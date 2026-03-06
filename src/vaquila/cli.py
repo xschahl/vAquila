@@ -86,7 +86,7 @@ def run(
     kv_cache_dtype: str | None = typer.Option(
         None,
         "--kv-cache-dtype",
-        help="KV cache dtype: fp16 or fp8 (if omitted: interactive prompt)",
+        help="KV cache dtype: auto, bfloat16, or fp8 (legacy fp16 is mapped to auto)",
     ),
 ) -> None:
     """Launch a model in a background vLLM container."""
