@@ -1,11 +1,9 @@
 services:
   vaq:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: vaquila:dev
+    image: ${VAQ_IMAGE:-ghcr.io/xschahl/vaquila:v0.1.0-beta.1}
     gpus: all
-    env_file: ".env"
+    env_file:
+      - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${VAQ_HF_CACHE_HOST_PATH}:/root/.cache/huggingface

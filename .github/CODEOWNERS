@@ -1,0 +1,22 @@
+# Default ownership
+
+- @xschahl
+
+# CI/CD and release automation
+
+.github/workflows/\* @xschahl
+Dockerfile @xschahl
+
+docker-compose.yml @xschahl
+
+# Core runtime and orchestration
+
+src/vaquila/commands/run.py @xschahl
+src/vaquila/docker_service.py @xschahl
+src/vaquila/gpu.py @xschahl
+src/vaquila/webui.py @xschahl
+
+# Documentation and public content
+
+README.md @xschahl
+docs/\*\* @xschahl

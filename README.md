@@ -60,6 +60,21 @@ or a custom-built CPU image from vLLM's CPU Docker instructions.
 docker compose build
 ```
 
+### 2b) Use prebuilt GHCR image (no local build)
+
+You can run vAquila directly from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/xschahl/vaquila:v0.1.0-beta.1
+docker run --rm ghcr.io/xschahl/vaquila:v0.1.0-beta.1 --help
+```
+
+You can also reuse it as a base image:
+
+```dockerfile
+FROM ghcr.io/xschahl/vaquila:v0.1.0-beta.1
+```
+
 ### 3) Use CLI through Docker
 
 Run a model:
