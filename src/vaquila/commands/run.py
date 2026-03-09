@@ -167,6 +167,10 @@ def cmd_run(
                 f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
                 f"kv_cache_dtype={resolved_kv_cache_dtype}, backend=cpu"
             )
+            console.print(
+                f"[cyan]Ensuring runtime image is available locally:[/cyan] {CONFIG.cpu_image} "
+                "(first launch may download the image and take longer)."
+            )
 
             with console.status(
                 "[cyan]Creating vLLM CPU container and preparing Hugging Face download...[/cyan]",
@@ -230,6 +234,10 @@ def cmd_run(
                 f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
                 f"kv_cache_dtype={resolved_kv_cache_dtype}, gpu_utilization={selected_ratio:.3f}, "
                 f"cpu_utilization={cpu_utilization if cpu_utilization is not None else 'none'}"
+            )
+            console.print(
+                f"[cyan]Ensuring runtime image is available locally:[/cyan] {CONFIG.image} "
+                "(first launch may download the image and take longer)."
             )
 
             with console.status(
@@ -344,6 +352,10 @@ def cmd_run(
             f"reasoning_parser={resolved_reasoning_parser or 'none'}, "
             f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
             f"kv_cache_dtype={resolved_kv_cache_dtype}, required_ratio~{new_required_ratio:.3f}"
+        )
+        console.print(
+            f"[cyan]Ensuring runtime image is available locally:[/cyan] {CONFIG.image} "
+            "(first launch may download the image and take longer)."
         )
 
         available_vram_gb = total_vram_gb * max_available_ratio

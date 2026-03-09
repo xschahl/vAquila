@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 
 import docker
-from docker.errors import DockerException, NotFound
+from docker.errors import DockerException, ImageNotFound, NotFound
 from docker.models.containers import Container
 from docker.types import DeviceRequest
 
@@ -66,6 +66,24 @@ def _docker_client() -> docker.DockerClient:
 def check_docker_connection() -> None:
     """Validate that the Docker daemon connection is operational."""
     _docker_client()
+
+
+def _ensure_image_available(client: docker.DockerClient, image: str) -> None:
+    """Ensure a Docker image exists locally, pulling it when missing."""
+    try:
+        client.images.get(image)
+        return
+    except ImageNotFound:
+        pass
+    except DockerException as exc:
+        raise VaquilaError(f"Unable to inspect Docker image `{image}`: {exc}") from exc
+
+    try:
+        client.images.pull(image)
+    except DockerException as exc:
+        raise VaquilaError(
+            f"Unable to pull Docker image `{image}`. Check network access and image name/tag."
+        ) from exc
 
 
 def get_container(container_name: str) -> Container:
@@ -181,6 +199,7 @@ def run_model_container(
         }
 
         selected_image = config.cpu_image if backend == "cpu" else config.image
+        _ensure_image_available(client, selected_image)
 
         nano_cpus: int | None = None
         if cpu_utilization is not None:
