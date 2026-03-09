@@ -202,6 +202,23 @@ src/vaquila/
 - `docker-compose.yml`: Docker-first execution of the `vaq` CLI
 - `.env.example`: self-host oriented runtime configuration
 
+### CI/CD and Docs
+
+- Docker publish workflow: `.github/workflows/docker-publish.yml`
+  - Pushes multi-arch images to GHCR: `ghcr.io/<owner>/vaquila`
+  - Triggers on `main`, tags (`v*`), and manual dispatch
+- Docs workflow: `.github/workflows/docs-pages.yml`
+  - Builds Docusaurus from `docs/`
+  - Deploys to GitHub Pages on `main` and manual dispatch
+
+Local docs development:
+
+```bash
+cd docs
+npm install
+npm run start
+```
+
 ## 🛠️ Tech Stack
 
 - **Language**: Python 3.10+
