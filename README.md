@@ -1,7 +1,7 @@
 # 🦅 vAquila
 
 <p align="center">
-	<img src="src/vaquila/assets/logo-base.png" alt="vAquila logo" width="160" />
+	<img src="src/vaquila/assets/preview.png" alt="vAquila" />
 </p>
 
 > **The Ollama developer experience, the vLLM production power.**
