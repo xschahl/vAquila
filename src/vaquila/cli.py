@@ -38,6 +38,22 @@ def run(
     model_id: str = typer.Argument(..., help="Hugging Face model id, e.g. meta-llama/Llama-3-8B-Instruct"),
     port: int = typer.Option(CONFIG.default_host_port, "--port", "-p", help="Exposed host port"),
     gpu_index: int = typer.Option(0, "--gpu", help="NVIDIA GPU index"),
+    device: str = typer.Option(
+        "gpu",
+        "--device",
+        help="Compute backend: gpu (default) or cpu",
+        case_sensitive=False,
+    ),
+    gpu_utilization: float | None = typer.Option(
+        None,
+        "--gpu-utilization",
+        help="Manual GPU memory utilization ratio (0..1). When set, GPU auto-estimation/tuning is disabled.",
+    ),
+    cpu_utilization: float | None = typer.Option(
+        None,
+        "--cpu-utilization",
+        help="Manual CPU limit ratio (0..1 of host logical CPU capacity). When set, estimation optimization is disabled.",
+    ),
     buffer_gb: float = typer.Option(
         None,
         "--buffer-gb",
@@ -94,6 +110,9 @@ def run(
         model_id=model_id,
         port=port,
         gpu_index=gpu_index,
+        device=device,
+        gpu_utilization=gpu_utilization,
+        cpu_utilization=cpu_utilization,
         buffer_gb=buffer_gb,
         startup_timeout=startup_timeout,
         max_num_seqs=max_num_seqs,

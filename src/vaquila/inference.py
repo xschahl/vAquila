@@ -83,6 +83,47 @@ def run_inference(
             break
         except HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
+            # Some legacy/base models (e.g. GPT-2) do not expose a chat template.
+            # In that case, retry once with the completions endpoint.
+            if exc.code == 400 and "chat template" in details.lower():
+                completion_payload = {
+                    "model": model_id,
+                    "prompt": prompt,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                }
+                completion_body = json.dumps(completion_payload).encode("utf-8")
+                completion_endpoint = f"{candidate_base_url.rstrip('/')}/v1/completions"
+                completion_request = Request(
+                    completion_endpoint,
+                    data=completion_body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urlopen(completion_request, timeout=timeout_seconds) as response:
+                        response_data = response.read().decode("utf-8")
+                    last_base_url = candidate_base_url
+                    break
+                except HTTPError as completion_exc:
+                    completion_details = completion_exc.read().decode("utf-8", errors="replace")
+                    last_error = VaquilaError(
+                        "vLLM API request failed on both chat and completion endpoints "
+                        f"at {candidate_base_url} (chat={exc.code}, completion={completion_exc.code}): "
+                        f"{completion_details}"
+                    )
+                    if index < len(candidate_base_urls) - 1:
+                        continue
+                    raise last_error from completion_exc
+                except URLError as completion_exc:
+                    last_error = VaquilaError(
+                        f"Unable to reach vLLM completions API at {candidate_base_url}. "
+                        "Verify model, port, and URL."
+                    )
+                    if index < len(candidate_base_urls) - 1:
+                        continue
+                    raise last_error from completion_exc
+
             last_error = VaquilaError(
                 f"vLLM API request failed ({exc.code}) at {candidate_base_url}: {details}"
             )
@@ -113,6 +154,9 @@ def run_inference(
     first_choice = choices[0]
     message = first_choice.get("message") if isinstance(first_choice, dict) else None
     if not isinstance(message, dict):
+        text_value = first_choice.get("text") if isinstance(first_choice, dict) else None
+        if isinstance(text_value, str):
+            return _sanitize_model_output(text_value)
         raise VaquilaError("Invalid API response: missing `message` field.")
 
     content = message.get("content")

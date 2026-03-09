@@ -104,6 +104,82 @@
           >
         </div>
         <div class="gpu-grid" id="gpu-grid"></div>
+        <div class="usage-legend" aria-label="GPU legend">
+          <span class="usage-legend-item">
+            <span class="legend-swatch legend-swatch-system"></span>
+            Brown segment: system or unmanaged VRAM usage
+          </span>
+        </div>
+      </section>
+
+      <section class="panel system-panel" id="system-usage-card">
+        <div class="panel-head">
+          <div class="system-usage-head">
+            <div>
+              <span class="eyebrow">Host metrics</span>
+              <h2>CPU and RAM utilization</h2>
+            </div>
+            <span class="panel-meta" id="system-summary"
+              >Detecting CPU and RAM usage...</span
+            >
+          </div>
+        </div>
+        <div class="system-usage">
+          <div class="system-usage-grid">
+            <div class="system-usage-item">
+              <div class="system-usage-label-row">
+                <span>CPU usage</span>
+                <span id="cpu-usage-value">-</span>
+              </div>
+              <div class="progress-track">
+                <span
+                  class="system-usage-bar cpu"
+                  id="cpu-usage-bar"
+                  style="width: 0%"
+                ></span>
+              </div>
+            </div>
+            <div class="system-usage-item">
+              <div class="system-usage-label-row">
+                <span>RAM usage</span>
+                <span id="ram-usage-value">-</span>
+              </div>
+              <div class="progress-track">
+                <span
+                  class="system-usage-bar ram"
+                  id="ram-usage-bar"
+                  style="width: 0%"
+                ></span>
+              </div>
+            </div>
+          </div>
+          <div class="system-model-breakdown">
+            <div class="system-model-title">CPU backend model breakdown</div>
+            <div class="system-model-track-block">
+              <div class="system-model-track-label">Model CPU share (host)</div>
+              <div
+                class="progress-track system-model-stack"
+                id="cpu-model-cpu-stack"
+              ></div>
+            </div>
+            <div class="system-model-track-block">
+              <div class="system-model-track-label">Model RAM share (host)</div>
+              <div
+                class="progress-track system-model-stack"
+                id="cpu-model-ram-stack"
+              ></div>
+            </div>
+            <div class="system-model-list" id="cpu-model-list">
+              <div class="empty-state">No CPU-backed model running.</div>
+            </div>
+          </div>
+          <div class="usage-legend" aria-label="CPU and RAM legend">
+            <span class="usage-legend-item">
+              <span class="legend-swatch legend-swatch-system"></span>
+              Brown segment: other host usage (outside listed CPU models)
+            </span>
+          </div>
+        </div>
       </section>
 
       <div class="workspace-grid">
@@ -140,6 +216,13 @@
                 />
               </div>
               <div class="field">
+                <label for="run-device">Device</label
+                ><select id="run-device" name="device">
+                  <option value="gpu" selected>gpu</option>
+                  <option value="cpu">cpu</option>
+                </select>
+              </div>
+              <div class="field" id="run-gpu-field">
                 <label for="run-gpu-index">GPU index</label
                 ><input
                   id="run-gpu-index"
@@ -149,7 +232,7 @@
                   min="0"
                 />
               </div>
-              <div class="field">
+              <div class="field" id="run-buffer-field">
                 <label for="run-buffer-gb">Buffer (GiB)</label
                 ><input
                   id="run-buffer-gb"
@@ -157,6 +240,32 @@
                   type="number"
                   step="0.1"
                   placeholder="Optional"
+                />
+              </div>
+              <div class="field" id="run-gpu-utilization-field">
+                <label for="run-gpu-utilization"
+                  >GPU utilization ratio (manual)</label
+                ><input
+                  id="run-gpu-utilization"
+                  name="gpu_utilization"
+                  type="number"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                  placeholder="Optional (0..1)"
+                />
+              </div>
+              <div class="field" id="run-cpu-utilization-field">
+                <label for="run-cpu-utilization"
+                  >CPU utilization ratio (manual)</label
+                ><input
+                  id="run-cpu-utilization"
+                  name="cpu_utilization"
+                  type="number"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                  placeholder="Optional (0..1)"
                 />
               </div>
               <div class="field">
@@ -244,6 +353,14 @@
                   >Tasks appear on the right and logs can be opened as a full
                   console.</span
                 >
+              </div>
+              <div class="run-estimate span-2" id="run-estimate-card">
+                <div class="run-estimate-status" id="run-estimate-status">
+                  Fill the run fields to compute an analytical VRAM estimate.
+                </div>
+                <div class="run-estimate-metrics" id="run-estimate-metrics">
+                  Waiting for input...
+                </div>
               </div>
             </form>
           </section>
@@ -371,6 +488,7 @@
                     <th>Model</th>
                     <th>Status</th>
                     <th>Port</th>
+                    <th>Backend</th>
                     <th>GPU</th>
                     <th>Actions</th>
                     <th>Logs</th>

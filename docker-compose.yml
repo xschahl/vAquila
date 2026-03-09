@@ -12,6 +12,7 @@ services:
     environment:
       - VAQ_HF_CACHE_HOST_PATH=${VAQ_HF_CACHE_HOST_PATH}
       - VAQ_VLLM_IMAGE=${VAQ_VLLM_IMAGE:-vllm/vllm-openai:latest}
+      - VAQ_VLLM_CPU_IMAGE=${VAQ_VLLM_CPU_IMAGE:-vllm/vllm-openai-cpu:latest-x86_64}
       - VAQ_SECURITY_VRAM_BUFFER_GB=${VAQ_SECURITY_VRAM_BUFFER_GB:-1.5}
       - VAQ_DEFAULT_HOST_PORT=${VAQ_DEFAULT_HOST_PORT:-8000}
       - VAQ_INFERENCE_BASE_URL=${VAQ_INFERENCE_BASE_URL:-http://host.docker.internal:8000}

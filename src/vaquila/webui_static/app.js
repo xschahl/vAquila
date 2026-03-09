@@ -2,6 +2,9 @@ const toast = document.getElementById("toast");
 const notificationCenter = document.getElementById("notification-center");
 const statusHealth = document.getElementById("status-health");
 const runForm = document.getElementById("run-form");
+const runEstimateCard = document.getElementById("run-estimate-card");
+const runEstimateStatus = document.getElementById("run-estimate-status");
+const runEstimateMetrics = document.getElementById("run-estimate-metrics");
 const inferForm = document.getElementById("infer-form");
 const inferOutput = document.getElementById("infer-output");
 const inferTarget = document.getElementById("infer-target");
@@ -12,6 +15,24 @@ const containersBody = document.getElementById("containers-body");
 const cacheBody = document.getElementById("cache-body");
 const gpuGrid = document.getElementById("gpu-grid");
 const gpuSummary = document.getElementById("gpu-summary");
+const systemSummary = document.getElementById("system-summary");
+const cpuUsageValue = document.getElementById("cpu-usage-value");
+const ramUsageValue = document.getElementById("ram-usage-value");
+const cpuUsageBar = document.getElementById("cpu-usage-bar");
+const ramUsageBar = document.getElementById("ram-usage-bar");
+const cpuModelCpuStack = document.getElementById("cpu-model-cpu-stack");
+const cpuModelRamStack = document.getElementById("cpu-model-ram-stack");
+const cpuModelList = document.getElementById("cpu-model-list");
+
+const runDevice = document.getElementById("run-device");
+const runGpuField = document.getElementById("run-gpu-field");
+const runBufferField = document.getElementById("run-buffer-field");
+const runGpuUtilField = document.getElementById("run-gpu-utilization-field");
+const runCpuUtilField = document.getElementById("run-cpu-utilization-field");
+const runGpuInput = document.getElementById("run-gpu-index");
+const runBufferInput = document.getElementById("run-buffer-gb");
+const runGpuUtilInput = document.getElementById("run-gpu-utilization");
+const runCpuUtilInput = document.getElementById("run-cpu-utilization");
 
 const statContainers = document.getElementById("stat-containers");
 const statRunning = document.getElementById("stat-running");
@@ -34,6 +55,7 @@ let refreshErrorNotified = false;
 let lastLogsErrorKey = null;
 let tasksSnapshotReady = false;
 let themeTransitionTimer = null;
+let runEstimateTimer = null;
 
 const taskStates = new Map();
 
@@ -358,6 +380,369 @@ function getFormPayload(form) {
   return payload;
 }
 
+function formatEstimateRatio(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return value.toFixed(3);
+}
+
+function setRunEstimateState(state, statusText, metricsText) {
+  if (!runEstimateCard || !runEstimateStatus || !runEstimateMetrics) return;
+
+  runEstimateCard.classList.remove("state-ok", "state-warn", "state-error");
+  if (state === "ok") runEstimateCard.classList.add("state-ok");
+  if (state === "warn") runEstimateCard.classList.add("state-warn");
+  if (state === "error") runEstimateCard.classList.add("state-error");
+
+  runEstimateStatus.textContent = statusText;
+  runEstimateMetrics.textContent = metricsText;
+}
+
+function renderRunEstimate(result) {
+  if (!result || result.ok !== true) {
+    setRunEstimateState(
+      "error",
+      "VRAM estimate unavailable",
+      result?.message || "Unable to compute estimate for this configuration.",
+    );
+    return;
+  }
+
+  if (result.manual_mode === true) {
+    const metrics = [
+      `device=${result.device || "gpu"}`,
+      `gpu_utilization=${result.gpu_utilization ?? "auto"}`,
+      `cpu_utilization=${result.cpu_utilization ?? "none"}`,
+      "estimation=disabled",
+      "optimization=disabled",
+    ];
+    setRunEstimateState(
+      "warn",
+      result.message || "Manual utilization mode enabled.",
+      metrics.join(" | "),
+    );
+    return;
+  }
+
+  if (String(result.device || "gpu").toLowerCase() === "cpu") {
+    const metrics = [
+      `device=cpu`,
+      `max-num-seqs=${result.requested_max_num_seqs ?? "n/a"}`,
+      `max-model-len=${result.max_model_len ?? "n/a"}`,
+      `quantization=${result.quantization ?? "n/a"}`,
+      `kv_cache_dtype=${result.kv_cache_dtype ?? "n/a"}`,
+      `VRAM estimate disabled in CPU mode`,
+    ];
+    setRunEstimateState(
+      "ok",
+      result.message || "CPU mode selected.",
+      metrics.join(" | "),
+    );
+    return;
+  }
+
+  const estimatedMaxNumSeqs = result.estimated_max_num_seqs;
+  const requestedMaxNumSeqs = Number(result.requested_max_num_seqs || 0);
+  const fitsRequested =
+    typeof estimatedMaxNumSeqs !== "number" ||
+    requestedMaxNumSeqs <= estimatedMaxNumSeqs;
+
+  const state = result.fits_current_settings && fitsRequested ? "ok" : "warn";
+  const breakdown = result.breakdown || {};
+  const statusText = result.fits_current_settings
+    ? "Current settings fit available VRAM"
+    : "Current settings are likely above available VRAM";
+
+  const metrics = [
+    `required ratio=${formatEstimateRatio(result.required_ratio)}`,
+    `available ratio=${formatEstimateRatio(result.max_available_ratio)}`,
+    `estimated max-num-seqs~${
+      typeof estimatedMaxNumSeqs === "number" ? estimatedMaxNumSeqs : "n/a"
+    }`,
+    `weights~${breakdown.weights_gb ?? "n/a"} GiB`,
+    `KV cache~${breakdown.kv_cache_gb ?? "n/a"} GiB`,
+    `overhead~${breakdown.runtime_overhead_gb ?? "n/a"} GiB`,
+    `buffer=${result.buffer_gb} GiB`,
+  ];
+
+  setRunEstimateState(state, statusText, metrics.join(" | "));
+}
+
+async function refreshRunEstimate() {
+  if (!runForm) return;
+
+  const payload = getFormPayload(runForm);
+  if (!payload.model_id || String(payload.model_id).trim() === "") {
+    setRunEstimateState(
+      "warn",
+      "Model ID required",
+      "Enter a model id to compute analytical capacity and VRAM estimate.",
+    );
+    return;
+  }
+
+  setRunEstimateState(
+    "warn",
+    "Computing estimate...",
+    String(payload.device || "gpu").toLowerCase() === "cpu"
+      ? "CPU mode selected: checking runtime settings without VRAM constraints."
+      : "Evaluating weights, KV cache, and runtime overhead on selected GPU.",
+  );
+
+  try {
+    const result = await api("/api/run/estimate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    renderRunEstimate(result);
+  } catch (error) {
+    setRunEstimateState(
+      "error",
+      "VRAM estimate failed",
+      error.message || "Unable to compute run estimate.",
+    );
+  }
+}
+
+function setUsageBar(valueElement, barElement, percent, suffixText = "") {
+  if (!valueElement || !barElement) return;
+
+  if (typeof percent !== "number" || Number.isNaN(percent)) {
+    valueElement.textContent = "-";
+    barElement.style.width = "0%";
+    return;
+  }
+
+  const clamped = Math.max(0, Math.min(100, percent));
+  valueElement.textContent = `${clamped.toFixed(1)}%${suffixText}`;
+  barElement.style.width = `${clamped.toFixed(1)}%`;
+}
+
+function renderSystemUsage(system) {
+  if (!systemSummary) return;
+
+  if (!system || system.available !== true) {
+    systemSummary.textContent = "CPU/RAM metrics unavailable.";
+    setUsageBar(cpuUsageValue, cpuUsageBar, Number.NaN);
+    setUsageBar(ramUsageValue, ramUsageBar, Number.NaN);
+    renderCpuModelBreakdown([], Number.NaN, Number.NaN, Number.NaN);
+    return;
+  }
+
+  const cpuPercent =
+    typeof system.cpu_percent === "number" ? system.cpu_percent : Number.NaN;
+  const ramPercent =
+    typeof system.ram_percent === "number" ? system.ram_percent : Number.NaN;
+
+  const cpuCount = Number(system.cpu_count || 0);
+  const cpuName =
+    typeof system.cpu_name === "string" && system.cpu_name.trim() !== ""
+      ? system.cpu_name.trim()
+      : "CPU model unavailable";
+  const cpuLabel =
+    Number.isFinite(cpuCount) && cpuCount > 0
+      ? `${cpuCount} logical cores`
+      : "core count unavailable";
+
+  const ramUsed = Number(system.ram_used_bytes || 0);
+  const ramTotal = Number(system.ram_total_bytes || 0);
+  const ramLabel =
+    ramTotal > 0
+      ? `${formatGiB(ramUsed)} / ${formatGiB(ramTotal)} GiB`
+      : "RAM size unavailable";
+
+  systemSummary.textContent = `${cpuName} • ${cpuLabel} • ${ramLabel}`;
+  setUsageBar(cpuUsageValue, cpuUsageBar, cpuPercent);
+  setUsageBar(ramUsageValue, ramUsageBar, ramPercent, ` (${ramLabel})`);
+
+  renderCpuModelBreakdown(
+    Array.isArray(system.cpu_models) ? system.cpu_models : [],
+    cpuCount,
+    ramTotal,
+    ramUsed,
+  );
+}
+
+function renderCpuModelBreakdown(
+  models,
+  cpuCount,
+  hostRamTotalBytes,
+  hostRamUsedBytes,
+) {
+  if (!cpuModelCpuStack || !cpuModelRamStack || !cpuModelList) return;
+
+  cpuModelCpuStack.innerHTML = "";
+  cpuModelRamStack.innerHTML = "";
+  cpuModelList.innerHTML = "";
+
+  const validCpuCount =
+    Number.isFinite(cpuCount) && cpuCount > 0 ? cpuCount : 1;
+  const validHostRamTotal =
+    Number.isFinite(hostRamTotalBytes) && hostRamTotalBytes > 0
+      ? hostRamTotalBytes
+      : 0;
+  const validHostRamUsed =
+    Number.isFinite(hostRamUsedBytes) && hostRamUsedBytes > 0
+      ? hostRamUsedBytes
+      : 0;
+
+  const rows = (Array.isArray(models) ? models : []).map((item, index) => {
+    const cpuPercentRaw =
+      typeof item.cpu_percent === "number" && !Number.isNaN(item.cpu_percent)
+        ? item.cpu_percent
+        : 0;
+    const hostCpuShare = Math.max(0, cpuPercentRaw / validCpuCount);
+
+    const ramBytes =
+      typeof item.ram_used_bytes === "number" &&
+      !Number.isNaN(item.ram_used_bytes)
+        ? Math.max(0, item.ram_used_bytes)
+        : 0;
+    const hostRamShare =
+      validHostRamTotal > 0
+        ? Math.max(0, (ramBytes / validHostRamTotal) * 100)
+        : 0;
+
+    const instanceId = getInstanceId(item);
+    const displayName = `${String(item.model_id || "Unknown model")} #${instanceId}`;
+    const hue = (196 + index * 37) % 360;
+
+    return {
+      displayName,
+      cpuPercentRaw,
+      hostCpuShare,
+      ramBytes,
+      hostRamShare,
+      color: `hsl(${hue} 70% 56%)`,
+    };
+  });
+
+  if (!rows.length) {
+    cpuModelList.innerHTML =
+      '<div class="empty-state">No CPU-backed model running.</div>';
+    return;
+  }
+
+  rows.forEach((row) => {
+    const cpuSegment = document.createElement("span");
+    cpuSegment.className = "gpu-segment gpu-segment-model";
+    cpuSegment.style.width = `${Math.max(0, row.hostCpuShare).toFixed(3)}%`;
+    cpuSegment.style.setProperty("--seg-color", row.color);
+    cpuSegment.dataset.tooltip = `${row.displayName} - ${row.cpuPercentRaw.toFixed(1)}% container CPU (~${row.hostCpuShare.toFixed(1)}% host)`;
+    cpuSegment.setAttribute(
+      "aria-label",
+      `${row.displayName} CPU usage ${row.cpuPercentRaw.toFixed(1)}% container`,
+    );
+    cpuModelCpuStack.appendChild(cpuSegment);
+
+    const ramSegment = document.createElement("span");
+    ramSegment.className = "gpu-segment gpu-segment-model";
+    ramSegment.style.width = `${Math.max(0, row.hostRamShare).toFixed(3)}%`;
+    ramSegment.style.setProperty("--seg-color", row.color);
+    ramSegment.dataset.tooltip = `${row.displayName} - ${formatGiB(row.ramBytes)} GiB RAM (${row.hostRamShare.toFixed(1)}% host)`;
+    ramSegment.setAttribute(
+      "aria-label",
+      `${row.displayName} RAM usage ${formatGiB(row.ramBytes)} GiB`,
+    );
+    cpuModelRamStack.appendChild(ramSegment);
+
+    const rowEl = document.createElement("div");
+    rowEl.className = "gpu-model-item";
+    rowEl.innerHTML = `
+      <span class="gpu-model-name">
+        <span class="legend-swatch" style="--seg-color:${row.color};"></span>
+        ${escapeHtml(row.displayName)}
+      </span>
+      <span>${row.cpuPercentRaw.toFixed(1)}% CPU • ${formatGiB(row.ramBytes)} GiB RAM</span>
+    `;
+    cpuModelList.appendChild(rowEl);
+  });
+
+  const totalCpuHostShare = rows.reduce(
+    (acc, row) => acc + row.hostCpuShare,
+    0,
+  );
+  const totalRamBytes = rows.reduce((acc, row) => acc + row.ramBytes, 0);
+  const residualCpuShare = Math.max(0, 100 - totalCpuHostShare);
+  const residualRamShare =
+    validHostRamTotal > 0
+      ? Math.max(
+          0,
+          (Math.max(0, validHostRamUsed - totalRamBytes) / validHostRamTotal) *
+            100,
+        )
+      : 0;
+
+  if (residualCpuShare > 0.1) {
+    const residual = document.createElement("span");
+    residual.className = "gpu-segment gpu-segment-system";
+    residual.style.width = `${residualCpuShare.toFixed(3)}%`;
+    residual.dataset.tooltip = `Other host CPU usage - ${residualCpuShare.toFixed(1)}%`;
+    residual.setAttribute(
+      "aria-label",
+      `Other host CPU usage ${residualCpuShare.toFixed(1)}%`,
+    );
+    cpuModelCpuStack.appendChild(residual);
+  }
+
+  if (residualRamShare > 0.1) {
+    const residual = document.createElement("span");
+    residual.className = "gpu-segment gpu-segment-system";
+    residual.style.width = `${residualRamShare.toFixed(3)}%`;
+    residual.dataset.tooltip = `Other host RAM usage - ${residualRamShare.toFixed(1)}%`;
+    residual.setAttribute(
+      "aria-label",
+      `Other host RAM usage ${residualRamShare.toFixed(1)}%`,
+    );
+    cpuModelRamStack.appendChild(residual);
+  }
+}
+
+function syncRunDeviceFields() {
+  const selectedDevice = String(runDevice?.value || "gpu").toLowerCase();
+  const isCpu = selectedDevice === "cpu";
+
+  if (runGpuField) {
+    runGpuField.classList.toggle("is-disabled", isCpu);
+  }
+  if (runBufferField) {
+    runBufferField.classList.toggle("is-disabled", isCpu);
+  }
+  if (runGpuUtilField) {
+    runGpuUtilField.classList.toggle("is-disabled", isCpu);
+  }
+  if (runCpuUtilField) {
+    runCpuUtilField.classList.toggle("is-disabled", !isCpu);
+  }
+  if (runGpuInput) {
+    runGpuInput.disabled = isCpu;
+  }
+  if (runBufferInput) {
+    runBufferInput.disabled = isCpu;
+  }
+  if (runGpuUtilInput) {
+    runGpuUtilInput.disabled = isCpu;
+    if (isCpu) {
+      runGpuUtilInput.value = "";
+    }
+  }
+  if (runCpuUtilInput) {
+    runCpuUtilInput.disabled = !isCpu;
+    if (!isCpu) {
+      runCpuUtilInput.value = "";
+    }
+  }
+}
+
+function scheduleRunEstimate() {
+  if (runEstimateTimer !== null) {
+    window.clearTimeout(runEstimateTimer);
+  }
+  runEstimateTimer = window.setTimeout(() => {
+    runEstimateTimer = null;
+    refreshRunEstimate();
+  }, 360);
+}
+
 function makeButton(label, className, onClick) {
   const button = document.createElement("button");
   button.type = "button";
@@ -646,7 +1031,7 @@ function renderContainers(items) {
 
   if (!Array.isArray(items) || items.length === 0) {
     containersBody.appendChild(
-      createEmptyRow("No managed containers found.", 7),
+      createEmptyRow("No managed containers found.", 8),
     );
     return;
   }
@@ -658,6 +1043,12 @@ function renderContainers(items) {
     tr.appendChild(makeCell("Model", `${container.model_id} #${instanceId}`));
     tr.appendChild(makeStatusCell("Status", container.status));
     tr.appendChild(makeCell("Port", String(container.host_port ?? "-")));
+    tr.appendChild(
+      makeCell(
+        "Backend",
+        String(container.compute_backend || "gpu").toUpperCase(),
+      ),
+    );
     tr.appendChild(makeCell("GPU", String(container.gpu_index ?? "-")));
 
     const actionsTd = document.createElement("td");
@@ -852,25 +1243,29 @@ function renderCache(items) {
 async function refreshAll(options = {}) {
   const { notifyOnFailure = false } = options;
   try {
-    const [health, containers, tasks, cache, gpu] = await Promise.all([
+    const [health, containers, tasks, cache, gpu, system] = await Promise.all([
       api("/api/health"),
       api("/api/containers"),
       api("/api/run/tasks"),
       api("/api/cache"),
       api("/api/gpu"),
+      api("/api/system"),
     ]);
 
     const containerItems = containers.items || [];
     const taskItems = tasks.items || [];
     const cacheItems = cache.items || [];
     const gpuItems = gpu.items || [];
+    const systemMetrics = system || {};
 
     syncTaskNotifications(taskItems);
     renderContainers(containerItems);
     renderTasks(taskItems);
     renderCache(cacheItems);
     renderGpu(gpuItems);
+    renderSystemUsage(systemMetrics);
     renderInferenceTargets(containerItems);
+    scheduleRunEstimate();
 
     statContainers.textContent = String(containerItems.length);
     statRunning.textContent = String(
@@ -915,10 +1310,21 @@ runForm.addEventListener("submit", async (event) => {
     notify(`Launch task queued for ${modelId}.`, "success", "Task queued");
     setStatus(`Launch task queued for ${modelId}.`, "ok");
     await refreshAll({ notifyOnFailure: true });
+    scheduleRunEstimate();
   } catch (error) {
     notify(`Run failed: ${error.message}`, "error", "Launch failed", 6500);
     setStatus(`Run failed: ${error.message}`, "error");
   }
+});
+
+runForm.addEventListener("input", () => {
+  syncRunDeviceFields();
+  scheduleRunEstimate();
+});
+
+runForm.addEventListener("change", () => {
+  syncRunDeviceFields();
+  scheduleRunEstimate();
 });
 
 inferForm.addEventListener("submit", async (event) => {
@@ -994,5 +1400,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 initTheme();
+syncRunDeviceFields();
 refreshAll();
+scheduleRunEstimate();
 setInterval(() => refreshAll({ notifyOnFailure: false }), 6000);

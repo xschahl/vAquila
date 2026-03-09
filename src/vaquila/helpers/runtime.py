@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import re
+from math import floor
 
 import typer
 
 from vaquila.helpers.cache import resolve_model_config
 from vaquila.exceptions import VaquilaError
+
+_GIB = 1024**3
 
 
 def normalize_optional_text(value: str | None) -> str | None:
@@ -78,47 +81,125 @@ def estimate_required_ratio_from_model_profile(
     total_vram_gb: float,
 ) -> float | None:
     """Estimate GPU ratio from model profile (weights + KV cache + runtime overhead)."""
+    breakdown = estimate_vram_breakdown_from_model_profile(
+        model_id=model_id,
+        max_num_seqs=max_num_seqs,
+        max_model_len=max_model_len,
+        kv_cache_dtype=kv_cache_dtype,
+        quantization=quantization,
+    )
+    if breakdown is None:
+        return None
+
+    estimated_total_gb = breakdown["total_gb"]
+    ratio = estimated_total_gb / total_vram_gb
+    return max(0.02, min(ratio, 0.95))
+
+
+def estimate_vram_breakdown_from_model_profile(
+    model_id: str,
+    max_num_seqs: int,
+    max_model_len: int,
+    kv_cache_dtype: str,
+    quantization: str | None,
+) -> dict[str, float] | None:
+    """Estimate VRAM components from model config using weights + KV cache + overhead."""
     payload = resolve_model_config(model_id)
     if not isinstance(payload, dict):
         return None
 
+    profile = _extract_attention_profile(payload)
+    if profile is None:
+        return None
+
+    hidden_size, num_layers, num_heads, num_kv_heads, head_dim = profile
+    vocab_size = _read_positive_int(payload, "vocab_size")
+
+    kv_bytes_per_elem = 1 if kv_cache_dtype == "fp8" else 2
+    kv_token_bytes = 2 * num_layers * num_kv_heads * head_dim * kv_bytes_per_elem
+    kv_cache_bytes = kv_token_bytes * max_model_len * max_num_seqs
+    kv_cache_gb = kv_cache_bytes / _GIB
+
+    estimated_params = _estimate_parameter_count(
+        model_id=model_id,
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        vocab_size=vocab_size,
+        payload=payload,
+    )
+    weight_bytes_per_param = _bytes_per_param_for_quantization(quantization)
+    weights_gb = (estimated_params * weight_bytes_per_param) / _GIB
+
+    runtime_overhead_gb = _estimate_runtime_overhead_gb(
+        weights_gb=weights_gb,
+        kv_cache_gb=kv_cache_gb,
+    )
+    total_gb = weights_gb + kv_cache_gb + runtime_overhead_gb
+
+    return {
+        "weights_gb": weights_gb,
+        "kv_cache_gb": kv_cache_gb,
+        "runtime_overhead_gb": runtime_overhead_gb,
+        "total_gb": total_gb,
+        "kv_token_bytes": float(kv_token_bytes),
+    }
+
+
+def estimate_max_num_seqs_from_model_profile(
+    model_id: str,
+    max_model_len: int,
+    kv_cache_dtype: str,
+    quantization: str | None,
+    available_vram_gb: float,
+) -> int | None:
+    """Estimate the maximum sustainable max-num-seqs for a given VRAM budget."""
+    if available_vram_gb <= 0:
+        return None
+
+    one_seq = estimate_vram_breakdown_from_model_profile(
+        model_id=model_id,
+        max_num_seqs=1,
+        max_model_len=max_model_len,
+        kv_cache_dtype=kv_cache_dtype,
+        quantization=quantization,
+    )
+    two_seq = estimate_vram_breakdown_from_model_profile(
+        model_id=model_id,
+        max_num_seqs=2,
+        max_model_len=max_model_len,
+        kv_cache_dtype=kv_cache_dtype,
+        quantization=quantization,
+    )
+    if one_seq is None or two_seq is None:
+        return None
+
+    fixed_gb = one_seq["weights_gb"] + one_seq["runtime_overhead_gb"]
+    per_seq_gb = max(0.000001, two_seq["kv_cache_gb"] - one_seq["kv_cache_gb"])
+    remaining_gb = available_vram_gb - fixed_gb
+    if remaining_gb <= 0:
+        return 0
+
+    return max(0, floor(remaining_gb / per_seq_gb))
+
+
+def _extract_attention_profile(payload: dict[str, object]) -> tuple[int, int, int, int, int] | None:
+    """Extract core attention dimensions required for KV cache memory formulas."""
     hidden_size = _read_positive_int(payload, "hidden_size", "d_model", "n_embd")
     num_layers = _read_positive_int(payload, "num_hidden_layers", "n_layer")
     num_heads = _read_positive_int(payload, "num_attention_heads", "n_head")
     num_kv_heads = _read_positive_int(payload, "num_key_value_heads", "num_kv_heads")
-    vocab_size = _read_positive_int(payload, "vocab_size")
 
-    if hidden_size is None or num_layers is None:
+    if hidden_size is None or num_layers is None or num_heads is None:
         return None
 
-    if num_heads is None or num_heads <= 0:
-        num_heads = 1
     if num_kv_heads is None or num_kv_heads <= 0:
         num_kv_heads = num_heads
 
-    head_dim = max(1, hidden_size // num_heads)
-    kv_bytes_per_elem = 1 if kv_cache_dtype == "fp8" else 2
+    head_dim = _read_positive_int(payload, "head_dim")
+    if head_dim is None:
+        head_dim = max(1, hidden_size // num_heads)
 
-    kv_cache_bytes = (
-        2
-        * num_layers
-        * num_kv_heads
-        * head_dim
-        * max_model_len
-        * max_num_seqs
-        * kv_bytes_per_elem
-    )
-    kv_cache_gb = (kv_cache_bytes / (1024**3)) * 1.15
-
-    estimated_params = _estimate_parameter_count(hidden_size, num_layers, vocab_size)
-    weight_bytes_per_param = _bytes_per_param_for_quantization(quantization)
-    weights_gb = (estimated_params * weight_bytes_per_param) / (1024**3)
-
-    runtime_overhead_gb = max(0.9, weights_gb * 0.10)
-    estimated_total_gb = weights_gb + kv_cache_gb + runtime_overhead_gb
-
-    ratio = estimated_total_gb / total_vram_gb
-    return max(0.02, min(ratio, 0.95))
+    return hidden_size, num_layers, num_heads, num_kv_heads, head_dim
 
 
 def _read_positive_int(payload: dict[str, object], *keys: str) -> int | None:
@@ -130,13 +211,48 @@ def _read_positive_int(payload: dict[str, object], *keys: str) -> int | None:
     return None
 
 
-def _estimate_parameter_count(hidden_size: int, num_layers: int, vocab_size: int | None) -> float:
-    """Estimate parameter count for a decoder-only LLM from config values."""
+def _estimate_parameter_count(
+    model_id: str,
+    hidden_size: int,
+    num_layers: int,
+    vocab_size: int | None,
+    payload: dict[str, object],
+) -> float:
+    """Estimate model parameter count, preferring explicit metadata when available."""
+    explicit_params = _read_positive_int(
+        payload,
+        "num_parameters",
+        "n_parameters",
+        "parameter_count",
+        "params",
+    )
+    if explicit_params is not None:
+        return float(explicit_params)
+
+    model_id_params = _extract_params_from_model_id(model_id)
+    if model_id_params is not None:
+        return model_id_params
+
     transformer_params = 12.0 * num_layers * (hidden_size**2)
     embedding_params = 0.0
     if vocab_size and vocab_size > 0:
         embedding_params = 2.0 * vocab_size * hidden_size
     return transformer_params + embedding_params
+
+
+def _extract_params_from_model_id(model_id: str) -> float | None:
+    """Extract parameter count from model names like ``Llama-3-8B`` or ``Qwen3-0.6B``."""
+    match = re.search(r"(?:^|[-_/])([0-9]+(?:\.[0-9]+)?)\s*([bm])(?:$|[-_/])", model_id.lower())
+    if match is None:
+        return None
+
+    value = float(match.group(1))
+    suffix = match.group(2)
+    multiplier = 1_000_000_000 if suffix == "b" else 1_000_000
+    params = value * multiplier
+    if params <= 0:
+        return None
+    return params
 
 
 def _bytes_per_param_for_quantization(quantization: str | None) -> float:
@@ -148,10 +264,18 @@ def _bytes_per_param_for_quantization(quantization: str | None) -> float:
     if q == "fp8":
         return 1.0
     if q in {"awq", "gptq", "marlin"}:
-        return 0.62
+        # 4-bit weights plus scales/metadata overhead in practice.
+        return 0.56
     if q in {"bitsandbytes", "bnb", "int8"}:
-        return 1.0
+        return 1.05
     return 1.4
+
+
+def _estimate_runtime_overhead_gb(weights_gb: float, kv_cache_gb: float) -> float:
+    """Estimate runtime overhead (CUDA context, PyTorch allocator, vLLM internals)."""
+    base_overhead = 1.5
+    dynamic_overhead = (weights_gb * 0.03) + (kv_cache_gb * 0.02)
+    return max(base_overhead, min(3.0, base_overhead + dynamic_overhead))
 
 
 def resolve_kv_cache_dtype(kv_cache_dtype: str | None) -> str:

@@ -24,6 +24,7 @@ class ManagedContainer:
     model_id: str
     status: str
     host_port: int | None
+    compute_backend: str | None
     gpu_index: int | None
     gpu_used_bytes: int | None
     gpu_utilization: float | None

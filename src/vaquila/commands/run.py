@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 
 from vaquila.cli_helpers import (
+    estimate_max_num_seqs_from_model_profile,
     estimate_required_ratio,
     extract_kv_cache_memory_bounds,
     extract_kv_max_concurrency,
@@ -85,6 +86,8 @@ def cmd_run(
     model_id: str,
     port: int,
     gpu_index: int,
+    gpu_utilization: float | None,
+    cpu_utilization: float | None,
     buffer_gb: float | None,
     startup_timeout: int,
     max_num_seqs: int | None,
@@ -95,9 +98,27 @@ def cmd_run(
     allow_long_context_override: bool | None,
     quantization: str,
     kv_cache_dtype: str | None,
+    device: str = "gpu",
 ) -> None:
     """Launch a model in a background vLLM container."""
     try:
+        compute_backend = device.lower().strip()
+        if compute_backend not in {"gpu", "cpu"}:
+            raise VaquilaError("Invalid --device value. Supported values: gpu, cpu.")
+
+        manual_mode = gpu_utilization is not None or cpu_utilization is not None
+        if gpu_utilization is not None and not (0.0 < gpu_utilization <= 1.0):
+            raise VaquilaError("Invalid --gpu-utilization value. Expected a ratio in (0, 1].")
+        if cpu_utilization is not None and not (0.0 < cpu_utilization <= 1.0):
+            raise VaquilaError("Invalid --cpu-utilization value. Expected a ratio in (0, 1].")
+        if compute_backend == "cpu" and gpu_utilization is not None:
+            raise VaquilaError("--gpu-utilization cannot be used with --device cpu.")
+        if compute_backend == "gpu" and manual_mode and gpu_utilization is None:
+            raise VaquilaError(
+                "Manual mode on GPU requires --gpu-utilization. "
+                "Provide both --gpu-utilization and optional --cpu-utilization."
+            )
+
         auto_buffer = 2.0 if platform.system() == "Windows" else 1.5
         buffer = buffer_gb if buffer_gb is not None else auto_buffer
         (
@@ -127,8 +148,122 @@ def cmd_run(
         )
         resolved_kv_cache_dtype = resolve_kv_cache_dtype(kv_cache_dtype)
 
+        if compute_backend == "cpu":
+            console.print(
+                "[yellow]CPU mode enabled:[/yellow] GPU VRAM estimation and auto-tuning are skipped. "
+                "Startup may be significantly slower than GPU mode."
+            )
+            if cpu_utilization is not None:
+                console.print(
+                    "[yellow]Manual CPU utilization mode:[/yellow] "
+                    f"container CPU limit ratio={cpu_utilization:.3f}."
+                )
+            console.print(f"[cyan]CPU runtime image:[/cyan] {CONFIG.cpu_image}")
+            console.print(
+                "[cyan]Requested runtime:[/cyan] "
+                f"max_num_seqs={resolved_max_num_seqs}, max_model_len={resolved_max_model_len}, "
+                f"tool_call_parser={resolved_tool_call_parser or 'none'}, "
+                f"reasoning_parser={resolved_reasoning_parser or 'none'}, "
+                f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
+                f"kv_cache_dtype={resolved_kv_cache_dtype}, backend=cpu"
+            )
+
+            with console.status(
+                "[cyan]Creating vLLM CPU container and preparing Hugging Face download...[/cyan]",
+                spinner="dots",
+            ):
+                container = run_model_container(
+                    model_id=model_id,
+                    host_port=port,
+                    gpu_index=None,
+                    gpu_utilization=None,
+                    cpu_utilization=cpu_utilization,
+                    max_num_seqs=resolved_max_num_seqs,
+                    max_model_len=resolved_max_model_len,
+                    tool_call_parser=resolved_tool_call_parser,
+                    reasoning_parser=resolved_reasoning_parser,
+                    enable_thinking=resolved_enable_thinking,
+                    required_ratio=None,
+                    allow_long_context_override=resolved_allow_long_context_override,
+                    quantization=resolved_quantization,
+                    kv_cache_dtype=resolved_kv_cache_dtype,
+                    config=CONFIG,
+                    compute_backend="cpu",
+                )
+
+            try:
+                wait_until_model_ready(console, container.name, timeout_seconds=startup_timeout)
+            except VaquilaError as exc:
+                error_text = str(exc)
+                hint = ""
+                if "Failed to infer device type" in error_text:
+                    hint = (
+                        " Detected a likely GPU-only vLLM runtime image. "
+                        "Use a vLLM CPU-compatible image/wheel for --device cpu."
+                    )
+                raise VaquilaError(
+                    "CPU startup failed. Ensure your selected vLLM image supports CPU execution "
+                    "and has sufficient host RAM. Original error: "
+                    f"{exc}.{hint}"
+                ) from exc
+
+            console.print("[bold green]✅ Model launched[/bold green]")
+            console.print(f"Container: [cyan]{container.name}[/cyan]")
+            console.print(f"API vLLM: [cyan]http://localhost:{port}[/cyan]")
+            console.print("Backend: [cyan]CPU[/cyan]")
+            console.print(f"Logs: [cyan]docker logs -f {container.name}[/cyan]")
+            return
+
         snapshot = read_gpu_snapshot(gpu_index)
         total_vram_gb = snapshot.total_bytes / (1024**3)
+
+        if manual_mode and gpu_utilization is not None:
+            selected_ratio = gpu_utilization
+            console.print(
+                "[yellow]Manual utilization mode:[/yellow] skipping VRAM estimation and auto-tuning."
+            )
+            console.print(
+                "[cyan]Requested runtime:[/cyan] "
+                f"max_num_seqs={resolved_max_num_seqs}, max_model_len={resolved_max_model_len}, "
+                f"tool_call_parser={resolved_tool_call_parser or 'none'}, "
+                f"reasoning_parser={resolved_reasoning_parser or 'none'}, "
+                f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
+                f"kv_cache_dtype={resolved_kv_cache_dtype}, gpu_utilization={selected_ratio:.3f}, "
+                f"cpu_utilization={cpu_utilization if cpu_utilization is not None else 'none'}"
+            )
+
+            with console.status(
+                "[cyan]Creating vLLM container with manual utilization settings...[/cyan]",
+                spinner="dots",
+            ):
+                container = run_model_container(
+                    model_id=model_id,
+                    host_port=port,
+                    gpu_index=gpu_index,
+                    gpu_utilization=selected_ratio,
+                    cpu_utilization=cpu_utilization,
+                    max_num_seqs=resolved_max_num_seqs,
+                    max_model_len=resolved_max_model_len,
+                    tool_call_parser=resolved_tool_call_parser,
+                    reasoning_parser=resolved_reasoning_parser,
+                    enable_thinking=resolved_enable_thinking,
+                    required_ratio=None,
+                    allow_long_context_override=resolved_allow_long_context_override,
+                    quantization=resolved_quantization,
+                    kv_cache_dtype=resolved_kv_cache_dtype,
+                    config=CONFIG,
+                )
+
+            wait_until_model_ready(console, container.name, timeout_seconds=startup_timeout)
+
+            console.print("[bold green]✅ Model launched[/bold green]")
+            console.print(f"Container: [cyan]{container.name}[/cyan]")
+            console.print(f"API vLLM: [cyan]http://localhost:{port}[/cyan]")
+            console.print(f"GPU: [cyan]{gpu_index}[/cyan] | Utilization: [cyan]{selected_ratio:.3f}[/cyan]")
+            if cpu_utilization is not None:
+                console.print(f"CPU limit ratio: [cyan]{cpu_utilization:.3f}[/cyan]")
+            console.print(f"Logs: [cyan]docker logs -f {container.name}[/cyan]")
+            return
 
         new_required_ratio = estimate_required_ratio(
             max_num_seqs=resolved_max_num_seqs,
@@ -161,10 +296,24 @@ def cmd_run(
             )
 
         if max_available_ratio < new_required_ratio:
+            available_vram_gb = total_vram_gb * max_available_ratio
+            estimated_max_num_seqs = estimate_max_num_seqs_from_model_profile(
+                model_id=model_id,
+                max_model_len=resolved_max_model_len,
+                kv_cache_dtype=resolved_kv_cache_dtype,
+                quantization=resolved_quantization,
+                available_vram_gb=available_vram_gb,
+            )
+            extra_hint = ""
+            if estimated_max_num_seqs is not None:
+                extra_hint = (
+                    f" Estimated max-num-seqs for this GPU/context is around {estimated_max_num_seqs}."
+                )
             raise VaquilaError(
                 "Runtime configuration is too demanding for available VRAM before vLLM startup. "
                 f"max_available_ratio={max_available_ratio:.3f}, required_ratio={new_required_ratio:.3f}. "
-                "Reduce max-num-seqs/max-model-len, or free VRAM (stop containers with `vaq ps` then `vaq stop <model_id>`)."
+                "Reduce max-num-seqs/max-model-len, or free VRAM (stop containers with `vaq ps` then "
+                f"`vaq stop <model_id>`).{extra_hint}"
             )
 
         ratio = max(new_required_ratio, 0.02)
@@ -197,6 +346,21 @@ def cmd_run(
             f"kv_cache_dtype={resolved_kv_cache_dtype}, required_ratio~{new_required_ratio:.3f}"
         )
 
+        available_vram_gb = total_vram_gb * max_available_ratio
+        estimated_max_num_seqs = estimate_max_num_seqs_from_model_profile(
+            model_id=model_id,
+            max_model_len=resolved_max_model_len,
+            kv_cache_dtype=resolved_kv_cache_dtype,
+            quantization=resolved_quantization,
+            available_vram_gb=available_vram_gb,
+        )
+        if estimated_max_num_seqs is not None and estimated_max_num_seqs >= 0:
+            console.print(
+                "[cyan]Analytical capacity estimate:[/cyan] "
+                f"up to ~{estimated_max_num_seqs} parallel requests "
+                f"for max_model_len={resolved_max_model_len} on current free VRAM."
+            )
+
         container = None
         selected_ratio = initial_ratio
         attempt_ratios = ratio_candidates(min_ratio=initial_ratio, max_ratio=max_available_ratio)
@@ -220,6 +384,7 @@ def cmd_run(
                     host_port=port,
                     gpu_index=gpu_index,
                     gpu_utilization=attempt_ratio,
+                    cpu_utilization=cpu_utilization,
                     max_num_seqs=resolved_max_num_seqs,
                     max_model_len=resolved_max_model_len,
                     tool_call_parser=resolved_tool_call_parser,
@@ -373,6 +538,7 @@ def cmd_run(
                         host_port=port,
                         gpu_index=gpu_index,
                         gpu_utilization=next_ratio,
+                        cpu_utilization=cpu_utilization,
                         max_num_seqs=resolved_max_num_seqs,
                         max_model_len=resolved_max_model_len,
                         tool_call_parser=resolved_tool_call_parser,
@@ -409,6 +575,7 @@ def cmd_run(
                             host_port=port,
                             gpu_index=gpu_index,
                             gpu_utilization=best_ratio,
+                            cpu_utilization=cpu_utilization,
                             max_num_seqs=resolved_max_num_seqs,
                             max_model_len=resolved_max_model_len,
                             tool_call_parser=resolved_tool_call_parser,
@@ -460,6 +627,7 @@ def cmd_run(
                         host_port=port,
                         gpu_index=gpu_index,
                         gpu_utilization=previous_ratio,
+                        cpu_utilization=cpu_utilization,
                         max_num_seqs=resolved_max_num_seqs,
                         max_model_len=resolved_max_model_len,
                         tool_call_parser=resolved_tool_call_parser,

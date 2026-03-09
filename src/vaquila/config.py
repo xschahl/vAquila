@@ -12,6 +12,7 @@ class RuntimeConfig:
     """Runtime settings for launching vLLM containers."""
 
     image: str = "vllm/vllm-openai:latest"
+    cpu_image: str = "vllm/vllm-openai:latest"
     default_host_port: int = 8000
     security_vram_buffer_gb: float = 1.5
     hf_cache_host_path: Path = Path.home() / ".cache" / "huggingface"
@@ -28,6 +29,7 @@ def _default_inference_base_url() -> str:
 def load_config() -> RuntimeConfig:
     """Load runtime configuration from environment variables."""
     image = os.getenv("VAQ_VLLM_IMAGE", "vllm/vllm-openai:latest")
+    cpu_image = os.getenv("VAQ_VLLM_CPU_IMAGE", image)
     default_host_port = int(os.getenv("VAQ_DEFAULT_HOST_PORT", "8000"))
     security_vram_buffer_gb = float(os.getenv("VAQ_SECURITY_VRAM_BUFFER_GB", "1.5"))
     hf_cache_host_path = Path(
@@ -37,6 +39,7 @@ def load_config() -> RuntimeConfig:
 
     return RuntimeConfig(
         image=image,
+        cpu_image=cpu_image,
         default_host_port=default_host_port,
         security_vram_buffer_gb=security_vram_buffer_gb,
         hf_cache_host_path=hf_cache_host_path,

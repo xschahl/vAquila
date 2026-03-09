@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import platform
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -21,8 +23,12 @@ from vaquila.cli_helpers import (
     cache_dir_to_model_id,
     check_hf_cache_path,
     dir_size_bytes,
+    estimate_max_num_seqs_from_model_profile,
+    estimate_required_ratio,
     list_cached_model_dirs,
     purge_model_cache,
+    resolve_kv_cache_dtype,
+    resolve_quantization_strategy,
 )
 from vaquila.commands import run as run_command_module
 from vaquila.commands.run import cmd_run
@@ -34,7 +40,13 @@ from vaquila.docker_service import (
     stop_model_container,
 )
 from vaquila.exceptions import VaquilaError
-from vaquila.gpu import read_all_gpu_snapshots, read_gpu_snapshot
+from vaquila.gpu import (
+    compute_adaptive_gpu_memory_utilization,
+    compute_gpu_memory_utilization,
+    read_all_gpu_snapshots,
+    read_gpu_snapshot,
+)
+from vaquila.helpers.runtime import estimate_vram_breakdown_from_model_profile
 from vaquila.inference import run_inference
 
 
@@ -56,6 +68,9 @@ class RunRequest(BaseModel):
     """Run request payload for launching a model container."""
 
     model_id: str = Field(min_length=1)
+    device: str = Field(default="gpu")
+    gpu_utilization: float | None = Field(default=None, gt=0, le=1)
+    cpu_utilization: float | None = Field(default=None, gt=0, le=1)
     port: int = Field(default=CONFIG.default_host_port, ge=1, le=65535)
     gpu_index: int = Field(default=0, ge=0)
     buffer_gb: float | None = Field(default=None, gt=0)
@@ -98,6 +113,155 @@ class InferRequest(BaseModel):
 def _utc_now() -> str:
     """Return an ISO-8601 UTC timestamp."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _read_linux_cpu_times() -> tuple[int, int] | None:
+    """Read Linux aggregate CPU times (total, idle) from /proc/stat."""
+    try:
+        with open("/proc/stat", "r", encoding="utf-8") as handle:
+            first_line = handle.readline().strip()
+    except OSError:
+        return None
+
+    if not first_line.startswith("cpu "):
+        return None
+
+    parts = first_line.split()
+    if len(parts) < 6:
+        return None
+
+    values: list[int] = []
+    for token in parts[1:]:
+        try:
+            values.append(int(token))
+        except ValueError:
+            return None
+
+    if len(values) < 5:
+        return None
+
+    idle_time = values[3]
+    iowait = values[4]
+    total_time = sum(values)
+    return total_time, idle_time + iowait
+
+
+def _read_cpu_name() -> str | None:
+    """Read a human-friendly CPU model name from host system information."""
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.lower().startswith("model name") and ":" in line:
+                    _, raw_name = line.split(":", 1)
+                    name = raw_name.strip()
+                    if name:
+                        return name
+    except OSError:
+        pass
+
+    platform_name = (platform.processor() or "").strip()
+    if platform_name:
+        return platform_name
+
+    machine = (platform.machine() or "").strip()
+    if machine:
+        return machine
+
+    return None
+
+
+def _read_linux_memory_usage() -> tuple[int, int] | None:
+    """Read Linux memory usage from /proc/meminfo as (used_bytes, total_bytes)."""
+    meminfo: dict[str, int] = {}
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if ":" not in line:
+                    continue
+                key, raw_value = line.split(":", 1)
+                parts = raw_value.strip().split()
+                if not parts:
+                    continue
+                try:
+                    meminfo[key] = int(parts[0])
+                except ValueError:
+                    continue
+    except OSError:
+        return None
+
+    total_kib = meminfo.get("MemTotal")
+    available_kib = meminfo.get("MemAvailable")
+    if total_kib is None:
+        return None
+    if available_kib is None:
+        free_kib = meminfo.get("MemFree", 0)
+        buffers_kib = meminfo.get("Buffers", 0)
+        cached_kib = meminfo.get("Cached", 0)
+        available_kib = free_kib + buffers_kib + cached_kib
+
+    total_bytes = total_kib * 1024
+    used_bytes = max(0, (total_kib - available_kib) * 1024)
+    return used_bytes, total_bytes
+
+
+def _compute_container_cpu_percent(stats: dict[str, object]) -> float | None:
+    """Compute container CPU usage percentage from one Docker stats payload."""
+    cpu_stats = stats.get("cpu_stats")
+    precpu_stats = stats.get("precpu_stats")
+    if not isinstance(cpu_stats, dict) or not isinstance(precpu_stats, dict):
+        return None
+
+    cpu_usage = cpu_stats.get("cpu_usage")
+    precpu_usage = precpu_stats.get("cpu_usage")
+    if not isinstance(cpu_usage, dict) or not isinstance(precpu_usage, dict):
+        return None
+
+    total_usage = cpu_usage.get("total_usage")
+    pre_total_usage = precpu_usage.get("total_usage")
+    system_usage = cpu_stats.get("system_cpu_usage")
+    pre_system_usage = precpu_stats.get("system_cpu_usage")
+    online_cpus = cpu_stats.get("online_cpus")
+
+    if not isinstance(total_usage, int) or not isinstance(pre_total_usage, int):
+        return None
+    if not isinstance(system_usage, int) or not isinstance(pre_system_usage, int):
+        return None
+
+    if not isinstance(online_cpus, int) or online_cpus <= 0:
+        percpu = cpu_usage.get("percpu_usage")
+        if isinstance(percpu, list) and percpu:
+            online_cpus = len(percpu)
+        else:
+            online_cpus = 1
+
+    cpu_delta = total_usage - pre_total_usage
+    system_delta = system_usage - pre_system_usage
+    if cpu_delta <= 0 or system_delta <= 0:
+        return None
+
+    cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0
+    return max(0.0, min(100.0 * max(1, online_cpus), cpu_percent))
+
+
+def _compute_container_memory_usage_bytes(stats: dict[str, object]) -> int | None:
+    """Extract cgroup memory usage for a container from Docker stats."""
+    memory_stats = stats.get("memory_stats")
+    if not isinstance(memory_stats, dict):
+        return None
+
+    usage = memory_stats.get("usage")
+    if not isinstance(usage, int):
+        return None
+
+    stats_map = memory_stats.get("stats")
+    if isinstance(stats_map, dict):
+        cache_bytes = stats_map.get("inactive_file")
+        if not isinstance(cache_bytes, int):
+            cache_bytes = stats_map.get("total_inactive_file")
+        if isinstance(cache_bytes, int) and cache_bytes >= 0:
+            usage = max(0, usage - cache_bytes)
+
+    return usage
 
 
 def _normalize_optional_text(value: str | None) -> str:
@@ -146,6 +310,9 @@ def create_web_app() -> FastAPI:
     tasks: dict[str, RunTask] = {}
     task_log_lines: dict[str, list[str]] = {}
     tasks_lock = Lock()
+    cpu_stats_lock = Lock()
+    previous_cpu_total: int | None = None
+    previous_cpu_idle: int | None = None
 
     def _append_task_log_line(task_id: str, line: str) -> None:
         normalized = line.strip()
@@ -300,6 +467,8 @@ def create_web_app() -> FastAPI:
                             model_id=payload.model_id,
                             port=payload.port,
                             gpu_index=payload.gpu_index,
+                            gpu_utilization=payload.gpu_utilization,
+                            cpu_utilization=payload.cpu_utilization,
                             buffer_gb=payload.buffer_gb,
                             startup_timeout=payload.startup_timeout,
                             max_num_seqs=payload.max_num_seqs,
@@ -310,6 +479,7 @@ def create_web_app() -> FastAPI:
                             allow_long_context_override=payload.allow_long_context_override,
                             quantization=payload.quantization,
                             kv_cache_dtype=payload.kv_cache_dtype,
+                            device=payload.device,
                         )
                 except typer.Exit as exc:
                     runner_state["exit_code"] = getattr(exc, "exit_code", 1)
@@ -465,6 +635,95 @@ def create_web_app() -> FastAPI:
 
         return {"available": True, "items": items}
 
+    @app.get("/api/system")
+    def system_status() -> dict[str, object]:
+        """Return host/system CPU and RAM utilization as percentages."""
+        nonlocal previous_cpu_total
+        nonlocal previous_cpu_idle
+
+        cpu_name = _read_cpu_name()
+        cpu_times = _read_linux_cpu_times()
+        memory_usage = _read_linux_memory_usage()
+
+        if cpu_times is None or memory_usage is None:
+            return {
+                "available": False,
+                "cpu_name": cpu_name,
+                "cpu_percent": None,
+                "ram_percent": None,
+                "cpu_count": os.cpu_count(),
+            }
+
+        current_total, current_idle = cpu_times
+        with cpu_stats_lock:
+            if previous_cpu_total is None or previous_cpu_idle is None:
+                cpu_percent = None
+            else:
+                delta_total = current_total - previous_cpu_total
+                delta_idle = current_idle - previous_cpu_idle
+                if delta_total <= 0:
+                    cpu_percent = None
+                else:
+                    busy_ratio = 1.0 - (max(0, delta_idle) / delta_total)
+                    cpu_percent = max(0.0, min(100.0, busy_ratio * 100.0))
+
+            previous_cpu_total = current_total
+            previous_cpu_idle = current_idle
+
+        used_bytes, total_bytes = memory_usage
+        ram_percent = 0.0 if total_bytes <= 0 else max(0.0, min(100.0, (used_bytes / total_bytes) * 100.0))
+
+        cpu_models: list[dict[str, object]] = []
+        cpu_models_cpu_percent_total = 0.0
+        cpu_models_ram_used_bytes_total = 0
+        try:
+            managed_rows = list_managed_containers()
+        except VaquilaError:
+            managed_rows = []
+
+        for row in managed_rows:
+            if row.status != "running" or str(row.compute_backend).lower() != "cpu":
+                continue
+
+            cpu_percent: float | None = None
+            ram_used_bytes: int | None = None
+            try:
+                container = get_container(row.name)
+                stats_payload = container.stats(stream=False)
+                if isinstance(stats_payload, dict):
+                    cpu_percent = _compute_container_cpu_percent(stats_payload)
+                    ram_used_bytes = _compute_container_memory_usage_bytes(stats_payload)
+            except VaquilaError:
+                pass
+
+            if cpu_percent is not None:
+                cpu_models_cpu_percent_total += cpu_percent
+            if ram_used_bytes is not None:
+                cpu_models_ram_used_bytes_total += ram_used_bytes
+
+            cpu_models.append(
+                {
+                    "name": row.name,
+                    "model_id": row.model_id,
+                    "instance_id": row.instance_id,
+                    "cpu_percent": None if cpu_percent is None else round(cpu_percent, 2),
+                    "ram_used_bytes": ram_used_bytes,
+                }
+            )
+
+        return {
+            "available": True,
+            "cpu_name": cpu_name,
+            "cpu_percent": None if cpu_percent is None else round(cpu_percent, 1),
+            "cpu_count": os.cpu_count(),
+            "ram_percent": round(ram_percent, 1),
+            "ram_used_bytes": used_bytes,
+            "ram_total_bytes": total_bytes,
+            "cpu_models": cpu_models,
+            "cpu_models_cpu_percent_total": round(cpu_models_cpu_percent_total, 2),
+            "cpu_models_ram_used_bytes_total": cpu_models_ram_used_bytes_total,
+        }
+
     @app.get("/api/logs/{container_name}")
     def container_logs(container_name: str, tail: int = 220) -> dict[str, object]:
         """Return recent logs for a vAquila container."""
@@ -561,6 +820,191 @@ def create_web_app() -> FastAPI:
 
         Thread(target=_launch_task, args=(task_id, payload), daemon=True).start()
         return {"task": asdict(task)}
+
+    @app.post("/api/run/estimate")
+    def estimate_run(payload: RunRequest) -> dict[str, object]:
+        """Estimate run feasibility and suggested capacity for the selected runtime."""
+        selected_device = payload.device.lower().strip()
+        if selected_device not in {"gpu", "cpu"}:
+            return {
+                "ok": False,
+                "message": "Invalid device. Supported values: gpu, cpu.",
+            }
+
+        if payload.gpu_utilization is not None and selected_device == "cpu":
+            return {
+                "ok": False,
+                "message": "gpu_utilization cannot be used when device=cpu.",
+            }
+
+        if (
+            selected_device == "gpu"
+            and payload.cpu_utilization is not None
+            and payload.gpu_utilization is None
+        ):
+            return {
+                "ok": False,
+                "message": "Manual GPU mode requires gpu_utilization when cpu_utilization is set.",
+            }
+
+        if payload.gpu_utilization is not None or payload.cpu_utilization is not None:
+            return {
+                "ok": True,
+                "device": selected_device,
+                "manual_mode": True,
+                "message": "Manual utilization mode enabled: estimation and optimization are bypassed.",
+                "requested_max_num_seqs": payload.max_num_seqs,
+                "max_model_len": payload.max_model_len,
+                "gpu_utilization": payload.gpu_utilization,
+                "cpu_utilization": payload.cpu_utilization,
+                "required_ratio": None,
+                "max_available_ratio": None,
+                "estimated_max_num_seqs": None,
+                "buffer_gb": payload.buffer_gb,
+                "available_vram_gb": None,
+                "total_vram_gb": None,
+                "breakdown": None,
+                "fits_current_settings": True,
+            }
+
+        try:
+            resolved_quantization, quantization_label = resolve_quantization_strategy(
+                model_id=payload.model_id,
+                quantization=payload.quantization,
+            )
+            resolved_kv_cache_dtype = resolve_kv_cache_dtype(payload.kv_cache_dtype)
+        except VaquilaError as exc:
+            return {
+                "ok": False,
+                "message": str(exc),
+            }
+
+        if selected_device == "cpu":
+            return {
+                "ok": True,
+                "device": "cpu",
+                "message": "CPU mode selected: VRAM estimate is not applicable.",
+                "fits_current_settings": True,
+                "requested_max_num_seqs": payload.max_num_seqs,
+                "max_model_len": payload.max_model_len,
+                "quantization": quantization_label,
+                "kv_cache_dtype": resolved_kv_cache_dtype,
+                "required_ratio": None,
+                "max_available_ratio": None,
+                "estimated_max_num_seqs": None,
+                "buffer_gb": None,
+                "available_vram_gb": None,
+                "total_vram_gb": None,
+                "breakdown": None,
+            }
+
+        try:
+            snapshot = read_gpu_snapshot(payload.gpu_index)
+        except VaquilaError as exc:
+            return {
+                "ok": False,
+                "message": str(exc),
+            }
+
+        auto_buffer = 2.0 if platform.system() == "Windows" else 1.5
+        buffer_gb = payload.buffer_gb if payload.buffer_gb is not None else auto_buffer
+
+        try:
+            running_on_same_gpu = [
+                item
+                for item in list_managed_containers()
+                if item.gpu_index == payload.gpu_index and item.status == "running"
+            ]
+        except VaquilaError:
+            running_on_same_gpu = []
+
+        try:
+            max_available_ratio = compute_gpu_memory_utilization(snapshot, security_buffer_gb=buffer_gb)
+            effective_buffer_gb = buffer_gb
+        except VaquilaError as exc:
+            if not running_on_same_gpu:
+                return {
+                    "ok": False,
+                    "message": str(exc),
+                }
+            try:
+                max_available_ratio, effective_buffer_gb = compute_adaptive_gpu_memory_utilization(
+                    snapshot,
+                    security_buffer_gb=buffer_gb,
+                )
+            except VaquilaError as adaptive_exc:
+                return {
+                    "ok": False,
+                    "message": str(adaptive_exc),
+                }
+
+        total_vram_gb = snapshot.total_bytes / (1024**3)
+        available_vram_gb = total_vram_gb * max_available_ratio
+
+        required_ratio = estimate_required_ratio(
+            max_num_seqs=payload.max_num_seqs,
+            max_model_len=payload.max_model_len,
+            tool_call_parser=payload.tool_call_parser.strip() or None,
+            reasoning_parser=payload.reasoning_parser.strip() or None,
+            enable_thinking=payload.enable_thinking,
+            kv_cache_dtype=resolved_kv_cache_dtype,
+            quantization=resolved_quantization,
+            model_id=payload.model_id,
+            total_vram_gb=total_vram_gb,
+        )
+
+        estimated_max_num_seqs = estimate_max_num_seqs_from_model_profile(
+            model_id=payload.model_id,
+            max_model_len=payload.max_model_len,
+            kv_cache_dtype=resolved_kv_cache_dtype,
+            quantization=resolved_quantization,
+            available_vram_gb=available_vram_gb,
+        )
+
+        breakdown = estimate_vram_breakdown_from_model_profile(
+            model_id=payload.model_id,
+            max_num_seqs=payload.max_num_seqs,
+            max_model_len=payload.max_model_len,
+            kv_cache_dtype=resolved_kv_cache_dtype,
+            quantization=resolved_quantization,
+        )
+
+        fits_current_settings = max_available_ratio >= required_ratio
+        if fits_current_settings:
+            message = "Current settings fit available VRAM with the selected safety buffer."
+        else:
+            message = (
+                "Current settings are likely above available VRAM. "
+                "Reduce max-num-seqs/max-model-len or free GPU memory."
+            )
+
+        rounded_breakdown = None
+        if breakdown is not None:
+            rounded_breakdown = {
+                "weights_gb": round(breakdown["weights_gb"], 2),
+                "kv_cache_gb": round(breakdown["kv_cache_gb"], 2),
+                "runtime_overhead_gb": round(breakdown["runtime_overhead_gb"], 2),
+                "total_gb": round(breakdown["total_gb"], 2),
+                "kv_token_kib": round(breakdown["kv_token_bytes"] / 1024, 2),
+            }
+
+        return {
+            "ok": True,
+            "device": "gpu",
+            "message": message,
+            "fits_current_settings": fits_current_settings,
+            "required_ratio": round(required_ratio, 3),
+            "max_available_ratio": round(max_available_ratio, 3),
+            "estimated_max_num_seqs": estimated_max_num_seqs,
+            "requested_max_num_seqs": payload.max_num_seqs,
+            "max_model_len": payload.max_model_len,
+            "buffer_gb": round(effective_buffer_gb, 2),
+            "available_vram_gb": round(available_vram_gb, 2),
+            "total_vram_gb": round(total_vram_gb, 2),
+            "quantization": quantization_label,
+            "kv_cache_dtype": resolved_kv_cache_dtype,
+            "breakdown": rounded_breakdown,
+        }
 
     @app.get("/api/run/tasks")
     def list_run_tasks() -> dict[str, list[dict[str, object]]]:
