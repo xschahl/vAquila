@@ -29,7 +29,7 @@ vAquila orchestrates everything for you. Like an eagle soaring over your infrast
 ### Prerequisites
 
 - Docker daemon running
-- NVIDIA drivers + GPU access enabled for Docker (`--gpus` support)
+- NVIDIA drivers + GPU access enabled for Docker (`--gpus` support) when using `--device gpu` (default)
 
 ### 1) Configure environment
 
@@ -38,6 +38,19 @@ Copy `.env.example` to `.env`, then set at least:
 ```bash
 VAQ_HF_CACHE_HOST_PATH=/absolute/path/to/your/.cache/huggingface
 ```
+
+Optional runtime images:
+
+```bash
+# GPU runtime image (default)
+VAQ_VLLM_IMAGE=vllm/vllm-openai:latest
+
+# CPU runtime image used when --device cpu is selected
+VAQ_VLLM_CPU_IMAGE=vllm/vllm-openai-cpu:latest-x86_64
+```
+
+For non-x86_64 hosts (ARM, Apple Silicon, etc.), use an architecture-specific CPU tag
+or a custom-built CPU image from vLLM's CPU Docker instructions.
 
 > This path is used by vAquila when it launches vLLM containers.
 
@@ -53,6 +66,12 @@ Run a model:
 
 ```bash
 docker compose run --rm vaq run meta-llama/Llama-3-8B-Instruct --port 8000 --gpu 0 --buffer-gb 1.5
+
+# CPU mode (no GPU allocation)
+docker compose run --rm vaq run openai-community/gpt2 --device cpu --port 8000
+
+# Manual utilization mode (skip estimation/optimization)
+docker compose run --rm vaq run Qwen/Qwen3-0.6B --gpu 0 --gpu-utilization 0.72 --cpu-utilization 0.60
 ```
 
 At launch, `vaq run` asks (with defaults):
@@ -66,6 +85,14 @@ At launch, `vaq run` asks (with defaults):
 - KV cache dtype (`auto`, `bfloat16`, or `fp8`; legacy `fp16` is mapped to `auto`)
 
 You can also pass them directly as CLI options for non-interactive usage.
+`vaq run` now supports `--device gpu|cpu` (default: `gpu`).
+`vaq run` also supports manual overrides:
+
+- `--gpu-utilization <ratio>` where ratio is in `(0, 1]`
+- `--cpu-utilization <ratio>` where ratio is in `(0, 1]`
+
+When one of these manual utilization options is provided, vAquila bypasses auto-estimation and optimization.
+Both modes keep the same OpenAI-compatible API surface (`/v1/...`) because they still use a vLLM OpenAI server image.
 vAquila computes a VRAM-aware initial GPU ratio from your runtime settings and model profile (weights + KV cache estimate + overhead).
 If requested settings exceed available VRAM, launch is refused before starting vLLM.
 If KV cache is still insufficient at startup, vAquila adjusts ratio with data-driven retries using vLLM error metrics (`needed GiB` / `available KV cache memory`) to converge faster.

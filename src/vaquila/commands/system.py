@@ -43,6 +43,7 @@ def cmd_ps() -> None:
     table.add_column("Model")
     table.add_column("Status")
     table.add_column("Port")
+    table.add_column("Backend")
     table.add_column("GPU")
     table.add_column("VRAM Used")
 
@@ -52,6 +53,7 @@ def cmd_ps() -> None:
             item.model_id,
             item.status,
             str(item.host_port) if item.host_port is not None else "n/a",
+            (item.compute_backend or "gpu").upper(),
             str(item.gpu_index) if item.gpu_index is not None else "n/a",
             format_gb(item.gpu_used_bytes),
         )

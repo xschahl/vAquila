@@ -148,6 +148,7 @@ def rebalance_and_start(
                 host_port=plan.host_port,
                 gpu_index=gpu_index,
                 gpu_utilization=shared_ratio,
+                cpu_utilization=None,
                 max_num_seqs=plan.max_num_seqs,
                 max_model_len=plan.max_model_len,
                 tool_call_parser=plan.tool_call_parser,

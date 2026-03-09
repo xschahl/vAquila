@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 
@@ -99,18 +100,20 @@ def _ensure_cache_dir(path: Path) -> Path:
 def run_model_container(
     model_id: str,
     host_port: int,
-    gpu_index: int,
-    gpu_utilization: float,
+    gpu_index: int | None,
+    gpu_utilization: float | None,
+    cpu_utilization: float | None,
     max_num_seqs: int,
     max_model_len: int,
     tool_call_parser: str | None,
     reasoning_parser: str | None,
     enable_thinking: bool,
-    required_ratio: float,
+    required_ratio: float | None,
     allow_long_context_override: bool,
     config: RuntimeConfig,
     quantization: str | None = None,
     kv_cache_dtype: str | None = None,
+    compute_backend: str = "gpu",
 ) -> Container:
     """Create and start a vLLM container for a Hugging Face model."""
     client = _docker_client()
@@ -121,13 +124,22 @@ def run_model_container(
     try:
         command = [
             model_id,
-            "--gpu-memory-utilization",
-            f"{gpu_utilization:.3f}",
             "--max-num-seqs",
             str(max_num_seqs),
             "--max-model-len",
             str(max_model_len),
         ]
+        backend = compute_backend.lower().strip()
+        if backend == "gpu":
+            if gpu_utilization is None or gpu_index is None:
+                raise VaquilaError("GPU launch requires gpu_index and gpu_utilization.")
+            command.extend(["--gpu-memory-utilization", f"{gpu_utilization:.3f}"])
+        elif backend == "cpu":
+            # CPU image selects backend internally; some tags do not accept --device.
+            pass
+        else:
+            raise VaquilaError(f"Unsupported compute backend: {compute_backend}")
+
         if tool_call_parser:
             command.extend(["--tool-call-parser", tool_call_parser])
         if reasoning_parser:
@@ -137,19 +149,55 @@ def run_model_container(
         if kv_cache_dtype:
             command.extend(["--kv-cache-dtype", kv_cache_dtype])
 
-        environment = {"NVIDIA_VISIBLE_DEVICES": str(gpu_index)}
+        environment: dict[str, str] = {}
+        if backend == "gpu" and gpu_index is not None:
+            environment["NVIDIA_VISIBLE_DEVICES"] = str(gpu_index)
+        if backend == "cpu":
+            # Prevent vLLM from trying to infer a GPU device in CPU-only runs.
+            environment["VLLM_TARGET_DEVICE"] = "cpu"
         if allow_long_context_override:
             environment["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
 
+        device_requests = None
+        if backend == "gpu" and gpu_index is not None:
+            device_requests = [DeviceRequest(device_ids=[str(gpu_index)], capabilities=[["gpu"]])]
+
+        labels = {
+            "com.vaquila.managed": "true",
+            "com.vaquila.model_id": model_id,
+            "com.vaquila.compute_backend": backend,
+            "com.vaquila.gpu_index": "" if gpu_index is None else str(gpu_index),
+            "com.vaquila.gpu_utilization": "" if gpu_utilization is None else f"{gpu_utilization:.3f}",
+            "com.vaquila.cpu_utilization": "" if cpu_utilization is None else f"{cpu_utilization:.3f}",
+            "com.vaquila.max_num_seqs": str(max_num_seqs),
+            "com.vaquila.max_model_len": str(max_model_len),
+            "com.vaquila.tool_call_parser": tool_call_parser or "",
+            "com.vaquila.reasoning_parser": reasoning_parser or "",
+            "com.vaquila.enable_thinking": "true" if enable_thinking else "false",
+            "com.vaquila.required_ratio": "" if required_ratio is None else f"{required_ratio:.3f}",
+            "com.vaquila.allow_long_context_override": "true" if allow_long_context_override else "false",
+            "com.vaquila.quantization": quantization or "",
+            "com.vaquila.kv_cache_dtype": kv_cache_dtype or "",
+        }
+
+        selected_image = config.cpu_image if backend == "cpu" else config.image
+
+        nano_cpus: int | None = None
+        if cpu_utilization is not None:
+            cpu_count = os.cpu_count() or 1
+            capped_ratio = max(0.0, min(1.0, cpu_utilization))
+            nano_cpus = int(capped_ratio * cpu_count * 1_000_000_000)
+            if nano_cpus <= 0:
+                nano_cpus = None
+
         container = client.containers.run(
-            image=config.image,
+            image=selected_image,
             command=command,
             name=name,
             detach=True,
             ports={"8000/tcp": host_port},
-            device_requests=[
-                DeviceRequest(device_ids=[str(gpu_index)], capabilities=[["gpu"]])
-            ],
+            device_requests=device_requests,
+            nano_cpus=nano_cpus,
             shm_size="2g",
             volumes={
                 str(cache_path): {
@@ -158,21 +206,7 @@ def run_model_container(
                 }
             },
             environment=environment,
-            labels={
-                "com.vaquila.managed": "true",
-                "com.vaquila.model_id": model_id,
-                "com.vaquila.gpu_index": str(gpu_index),
-                "com.vaquila.gpu_utilization": f"{gpu_utilization:.3f}",
-                "com.vaquila.max_num_seqs": str(max_num_seqs),
-                "com.vaquila.max_model_len": str(max_model_len),
-                "com.vaquila.tool_call_parser": tool_call_parser or "",
-                "com.vaquila.reasoning_parser": reasoning_parser or "",
-                "com.vaquila.enable_thinking": "true" if enable_thinking else "false",
-                "com.vaquila.required_ratio": f"{required_ratio:.3f}",
-                "com.vaquila.allow_long_context_override": "true" if allow_long_context_override else "false",
-                "com.vaquila.quantization": quantization or "",
-                "com.vaquila.kv_cache_dtype": kv_cache_dtype or "",
-            },
+            labels=labels,
         )
         return container
     except DockerException as exc:
@@ -189,6 +223,7 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
         labels = container.labels or {}
         model_id = labels.get("com.vaquila.model_id", "unknown")
         instance_id = labels.get("com.vaquila.instance_id") or container.short_id
+        compute_backend = labels.get("com.vaquila.compute_backend") or "gpu"
         gpu_idx_value = labels.get("com.vaquila.gpu_index")
 
         gpu_index: int | None = None
@@ -273,6 +308,7 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
                 model_id=model_id,
                 status=container.status,
                 host_port=host_port,
+                compute_backend=compute_backend,
                 gpu_index=gpu_index,
                 gpu_used_bytes=gpu_used,
                 gpu_utilization=gpu_utilization,
