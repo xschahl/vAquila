@@ -1,65 +1,45 @@
 /**
  * CSS overrides for Docusaurus
+ * These variables power the /docs portion of the site (Light and Dark modes).
  */
 
-:root {
-  --ifm-color-primary: #00d2ff;
-  --ifm-color-primary-dark: #00bce6;
-  --ifm-color-primary-darker: #00b2d9;
-  --ifm-color-primary-darkest: #0092b3;
-  --ifm-color-primary-light: #33dbff;
-  --ifm-color-primary-lighter: #4de0ff;
-  --ifm-color-primary-lightest: #99eeff;
+ /* Light Mode Variables (vAquila Blue) */
+ :root {
+  --ifm-color-primary: #0284c7;
+  --ifm-color-primary-dark: #0277b3;
+  --ifm-color-primary-darker: #0270a9;
+  --ifm-color-primary-darkest: #015d8b;
+  --ifm-color-primary-light: #0291db;
+  --ifm-color-primary-lighter: #0298e5;
+  --ifm-color-primary-lightest: #1aa6ed;
   
   --ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Dark Mode Variables (vAquila Cyan) */
+[data-theme='dark'] {
+  --ifm-color-primary: #00E5FF;
+  --ifm-color-primary-dark: #00cee6;
+  --ifm-color-primary-darker: #00c3d9;
+  --ifm-color-primary-darkest: #00a0b3;
+  --ifm-color-primary-light: #1ae8ff;
+  --ifm-color-primary-lighter: #26e9ff;
+  --ifm-color-primary-lightest: #4dedff;
   
-  /* Landing page variables */
-  --vaq-bg-dark: #0b1121;
-  --vaq-bg-panel: #141b2d;
-  --vaq-border: #23304c;
-  --vaq-text: #e2e8f0;
-  --vaq-muted: #94a3b8;
-  --vaq-accent-cyan: #00E5FF;
+  /* Make Docusaurus top navbar fit the aesthetic perfectly */
+  --ifm-navbar-background-color: #080D1A;
+  --ifm-background-color: #0B1121;
 }
 
-[data-theme='light'] {
-  --vaq-bg-dark: #f8fafc;
-  --vaq-bg-panel: #ffffff;
-  --vaq-border: #e2e8f0;
-  --vaq-text: #0f172a;
-  --vaq-muted: #64748b;
-  --vaq-accent-cyan: #0284c7;
+/* Base Docusaurus styling tweaks */
+[data-theme='dark'] body {
+  background-color: var(--ifm-background-color);
 }
-
-body {
-  background-color: var(--vaq-bg-dark);
-  color: var(--vaq-text);
-  font-family: var(--ifm-font-family-base);
+[data-theme='dark'] .navbar {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .hero__title {
   letter-spacing: -0.02em;
   font-weight: 800;
-}
-
-.button--primary {
-  color: #0b1121 !important;
-  font-weight: 600;
-  background-color: var(--vaq-accent-cyan);
-  border-color: var(--vaq-accent-cyan);
-}
-
-.button--primary:hover {
-  background-color: #33eaff;
-  box-shadow: 0 0 15px rgba(0, 229, 255, 0.4);
-}
-
-.navbar {
-  background-color: var(--vaq-bg-panel);
-  border-bottom: 1px solid var(--vaq-border);
-}
-
-.footer {
-  background-color: var(--vaq-bg-panel);
-  border-top: 1px solid var(--vaq-border);
 }

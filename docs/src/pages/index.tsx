@@ -192,16 +192,7 @@ export default function Home() {
         <meta name="description" content="Operate your local vLLM runtime with confidence via an ultra-modern control center." />
         <style>
           {`
-            /* Reset body for the custom landing page */
-            body {
-              margin: 0;
-              padding: 0;
-              background-color: #080D1A;
-              color: #E2E8F0;
-              font-family: 'Inter', system-ui, -apple-system, sans-serif;
-              overflow-x: hidden;
-            }
-            /* Hide the Docusaurus skip to content link */
+            /* Prevent Docusaurus layout from showing the skip to content link when there is no layout */
             .skipToContent_node_modules-\\@docusaurus-theme-classic-lib-theme-SkipToContent-styles-module {
               display: none !important;
             }
