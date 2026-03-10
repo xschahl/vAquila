@@ -1,13 +1,65 @@
+/**
+ * CSS overrides for Docusaurus
+ */
+
 :root {
-  --ifm-color-primary: #2f6fbd;
-  --ifm-color-primary-dark: #285fa2;
-  --ifm-color-primary-darker: #245994;
-  --ifm-color-primary-darkest: #1e4979;
-  --ifm-color-primary-light: #3a7cca;
-  --ifm-color-primary-lighter: #4b88d0;
-  --ifm-color-primary-lightest: #6aa0db;
+  --ifm-color-primary: #00d2ff;
+  --ifm-color-primary-dark: #00bce6;
+  --ifm-color-primary-darker: #00b2d9;
+  --ifm-color-primary-darkest: #0092b3;
+  --ifm-color-primary-light: #33dbff;
+  --ifm-color-primary-lighter: #4de0ff;
+  --ifm-color-primary-lightest: #99eeff;
+  
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  
+  /* Landing page variables */
+  --vaq-bg-dark: #0b1121;
+  --vaq-bg-panel: #141b2d;
+  --vaq-border: #23304c;
+  --vaq-text: #e2e8f0;
+  --vaq-muted: #94a3b8;
+  --vaq-accent-cyan: #00E5FF;
+}
+
+[data-theme='light'] {
+  --vaq-bg-dark: #f8fafc;
+  --vaq-bg-panel: #ffffff;
+  --vaq-border: #e2e8f0;
+  --vaq-text: #0f172a;
+  --vaq-muted: #64748b;
+  --vaq-accent-cyan: #0284c7;
+}
+
+body {
+  background-color: var(--vaq-bg-dark);
+  color: var(--vaq-text);
+  font-family: var(--ifm-font-family-base);
 }
 
 .hero__title {
   letter-spacing: -0.02em;
+  font-weight: 800;
+}
+
+.button--primary {
+  color: #0b1121 !important;
+  font-weight: 600;
+  background-color: var(--vaq-accent-cyan);
+  border-color: var(--vaq-accent-cyan);
+}
+
+.button--primary:hover {
+  background-color: #33eaff;
+  box-shadow: 0 0 15px rgba(0, 229, 255, 0.4);
+}
+
+.navbar {
+  background-color: var(--vaq-bg-panel);
+  border-bottom: 1px solid var(--vaq-border);
+}
+
+.footer {
+  background-color: var(--vaq-bg-panel);
+  border-top: 1px solid var(--vaq-border);
 }

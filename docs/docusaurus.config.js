@@ -29,7 +29,7 @@ const config = {
       {
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
-          routeBasePath: "/",
+          routeBasePath: "/docs",
         },
         blog: false,
         theme: {
@@ -69,11 +69,11 @@ const config = {
           items: [
             {
               label: "Getting Started",
-              to: "/getting-started",
+              to: "/docs/getting-started",
             },
             {
               label: "CLI Reference",
-              to: "/cli-reference",
+              to: "/docs/cli-reference",
             },
           ],
         },
