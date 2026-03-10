@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 import json
+import re
 import platform
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from vaquila.cli_helpers import (
     resolve_kv_cache_dtype,
     resolve_quantization_strategy,
     resolve_run_runtime_settings,
+    suggest_runtime_fallbacks_from_vram_budget,
     suggest_ratio_from_kv_cache_error,
     wait_until_model_ready,
 )
@@ -37,9 +39,110 @@ from vaquila.gpu import compute_adaptive_gpu_memory_utilization, compute_gpu_mem
 console = Console()
 
 
+def _looks_like_windows_host_path(path: Path) -> bool:
+    """Return True when a path string looks like a Windows absolute host path."""
+    return re.match(r"^[a-zA-Z]:[\\/]", str(path)) is not None
+
+
+def _persistent_cache_root() -> Path:
+    """Return a writable cache root for run-time persistence files."""
+    configured = CONFIG.hf_cache_host_path
+    in_container = Path("/.dockerenv").exists()
+
+    candidates: list[Path] = []
+    if not (in_container and _looks_like_windows_host_path(configured)):
+        candidates.append(configured)
+
+    # Docker compose mounts host HF cache here inside the launcher container.
+    candidates.append(Path("/root/.cache/huggingface"))
+    candidates.append(Path.home() / ".cache" / "huggingface")
+
+    for candidate in candidates:
+        with suppress(OSError):
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".vaq_write_test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return candidate
+
+    # Last-resort fallback: preserve current behavior even if later write fails.
+    return configured
+
+
 def _tuning_hints_path() -> Path:
     """Return the persistence file for optimized ratio hints."""
-    return CONFIG.hf_cache_host_path / "vaquila_tuning_hints.json"
+    return _persistent_cache_root() / "vaquila_tuning_hints.json"
+
+
+def _gpu_calibration_path() -> Path:
+    """Return the persistence file for GPU-level ratio calibration."""
+    return _persistent_cache_root() / "vaquila_gpu_ratio_calibration.json"
+
+
+def _build_gpu_calibration_key(gpu_name: str | None, total_vram_gb: float) -> str:
+    """Build a stable GPU fingerprint key used to calibrate first-run ratio."""
+    normalized_name = (gpu_name or "unknown-gpu").strip().lower()
+    return f"{normalized_name}|vram={total_vram_gb:.2f}"
+
+
+def _load_gpu_calibration_factor(key: str) -> tuple[float, int] | None:
+    """Load a persisted GPU calibration factor and its confidence count."""
+    path = _gpu_calibration_path()
+    with suppress(OSError, json.JSONDecodeError, TypeError, ValueError):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+
+        record = payload.get(key)
+        if not isinstance(record, dict):
+            return None
+
+        factor = float(record.get("factor", 1.0))
+        count = int(record.get("count", 0))
+        if factor <= 0 or count < 0:
+            return None
+
+        return factor, count
+    return None
+
+
+def _save_gpu_calibration_factor(key: str, factor: float, count: int) -> None:
+    """Persist a bounded GPU calibration factor with confidence count."""
+    path = _gpu_calibration_path()
+    with suppress(OSError, json.JSONDecodeError, TypeError, ValueError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        payload: dict[str, object] = {}
+        if path.exists():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict):
+                payload = existing
+
+        payload[key] = {
+            "factor": round(float(factor), 4),
+            "count": max(0, int(count)),
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _update_gpu_calibration(key: str, observed_ratio: float, base_required_ratio: float) -> None:
+    """Update per-GPU calibration from observed stable ratio using bounded EMA."""
+    if observed_ratio <= 0 or base_required_ratio <= 0:
+        return
+
+    observed_factor = observed_ratio / base_required_ratio
+    observed_factor = max(0.55, min(1.20, observed_factor))
+
+    current = _load_gpu_calibration_factor(key)
+    if current is None:
+        _save_gpu_calibration_factor(key, observed_factor, 1)
+        return
+
+    current_factor, current_count = current
+    alpha = 0.35
+    next_factor = (current_factor * (1.0 - alpha)) + (observed_factor * alpha)
+    next_factor = max(0.55, min(1.20, next_factor))
+    _save_gpu_calibration_factor(key, next_factor, current_count + 1)
 
 
 def _build_tuning_hint_key(
@@ -220,6 +323,7 @@ def cmd_run(
 
         snapshot = read_gpu_snapshot(gpu_index)
         total_vram_gb = snapshot.total_bytes / (1024**3)
+        gpu_calibration_key = _build_gpu_calibration_key(snapshot.name, total_vram_gb)
 
         if manual_mode and gpu_utilization is not None:
             selected_ratio = gpu_utilization
@@ -284,6 +388,20 @@ def cmd_run(
             model_id=model_id,
             total_vram_gb=total_vram_gb,
         )
+        base_required_ratio = new_required_ratio
+
+        gpu_calibration = _load_gpu_calibration_factor(gpu_calibration_key)
+        if gpu_calibration is not None:
+            factor, count = gpu_calibration
+            if count >= 2:
+                calibrated_ratio = max(0.02, min(new_required_ratio * factor, 0.90))
+                if abs(calibrated_ratio - new_required_ratio) >= 0.001:
+                    console.print(
+                        "[cyan]GPU calibration applied:[/cyan] "
+                        f"factor={factor:.3f}, samples={count}, "
+                        f"required_ratio {new_required_ratio:.3f} -> {calibrated_ratio:.3f}."
+                    )
+                new_required_ratio = calibrated_ratio
 
         running_on_same_gpu = [
             item for item in list_managed_containers() if item.gpu_index == gpu_index and item.status == "running"
@@ -312,16 +430,65 @@ def cmd_run(
                 quantization=resolved_quantization,
                 available_vram_gb=available_vram_gb,
             )
-            extra_hint = ""
+            fallback = suggest_runtime_fallbacks_from_vram_budget(
+                model_id=model_id,
+                max_num_seqs=resolved_max_num_seqs,
+                max_model_len=resolved_max_model_len,
+                kv_cache_dtype=resolved_kv_cache_dtype,
+                quantization=resolved_quantization,
+                total_vram_gb=total_vram_gb,
+                max_available_ratio=max_available_ratio,
+            )
+
+            suggestion_lines: list[str] = []
             if estimated_max_num_seqs is not None:
-                extra_hint = (
-                    f" Estimated max-num-seqs for this GPU/context is around {estimated_max_num_seqs}."
+                suggestion_lines.append(
+                    f"- For context={resolved_max_model_len}, max-num-seqs should be around {estimated_max_num_seqs}."
                 )
+
+            estimated_max_model_len = fallback.get("estimated_max_model_len")
+            if isinstance(estimated_max_model_len, int):
+                suggestion_lines.append(
+                    f"- For max-num-seqs={resolved_max_num_seqs}, max-model-len should be around {estimated_max_model_len}."
+                )
+
+            quant_suggestions = fallback.get("quantization_suggestions")
+            if isinstance(quant_suggestions, list) and quant_suggestions:
+                formatted = ", ".join(
+                    f"{quant} (required~{ratio:.3f})"
+                    for quant, ratio in quant_suggestions
+                    if isinstance(quant, str) and isinstance(ratio, (int, float))
+                )
+                if formatted:
+                    suggestion_lines.append(f"- Quantization candidates that should fit: {formatted}.")
+
+            breakdown = fallback.get("current_breakdown")
+            breakdown_hint = ""
+            if isinstance(breakdown, dict):
+                try:
+                    weights = float(breakdown.get("weights_gb", 0.0))
+                    kv_cache = float(breakdown.get("kv_cache_gb", 0.0))
+                    overhead = float(breakdown.get("runtime_overhead_gb", 0.0))
+                    total = float(breakdown.get("total_gb", 0.0))
+                    breakdown_hint = (
+                        " Analytical estimate: "
+                        f"weights={weights:.2f} GiB, KV={kv_cache:.2f} GiB, "
+                        f"overhead={overhead:.2f} GiB, total={total:.2f} GiB."
+                    )
+                except (TypeError, ValueError):
+                    breakdown_hint = ""
+
+            suggestions_hint = ""
+            if suggestion_lines:
+                suggestions_hint = " Suggestions:\n" + "\n".join(suggestion_lines)
+
             raise VaquilaError(
                 "Runtime configuration is too demanding for available VRAM before vLLM startup. "
                 f"max_available_ratio={max_available_ratio:.3f}, required_ratio={new_required_ratio:.3f}. "
                 "Reduce max-num-seqs/max-model-len, or free VRAM (stop containers with `vaq ps` then "
-                f"`vaq stop <model_id>`).{extra_hint}"
+                f"`vaq stop <model_id>`)."
+                f"{breakdown_hint}"
+                f"{suggestions_hint}"
             )
 
         ratio = max(new_required_ratio, 0.02)
@@ -334,7 +501,7 @@ def cmd_run(
         )
         hinted_ratio = _load_tuning_hint_ratio(tuning_key)
         initial_ratio = ratio
-        if hinted_ratio is not None and ratio <= hinted_ratio <= max_available_ratio:
+        if hinted_ratio is not None and 0.02 <= hinted_ratio <= max_available_ratio:
             initial_ratio = hinted_ratio
             console.print(
                 f"[cyan]Tuning hint detected:[/cyan] previous stable ratio={hinted_ratio:.3f} "
@@ -510,9 +677,13 @@ def cmd_run(
                 if lowest_failed_ratio is not None and lowest_failed_ratio < best_ratio:
                     next_ratio = round((best_ratio + lowest_failed_ratio) / 2, 3)
                 else:
-                    ratio_by_observed = best_ratio * (target_concurrency / best_observed_concurrency) * 1.03
+                    # Project a tighter ratio from observed concurrency when KV cache is clearly over-allocated.
+                    # Using min(...) instead of max(...) makes early iterations more decisive while keeping
+                    # a floor-bound and rollback logic for safety.
+                    ratio_by_observed = best_ratio * (target_concurrency / best_observed_concurrency) * 1.08
                     ratio_by_headroom = best_ratio - (remaining_headroom * 0.60)
-                    next_ratio = round(max(floor_ratio, ratio_by_observed, ratio_by_headroom), 3)
+                    projected_ratio = min(ratio_by_observed, ratio_by_headroom)
+                    next_ratio = round(max(floor_ratio, projected_ratio), 3)
                     next_ratio = min(next_ratio, round(best_ratio - 0.003, 3))
                     next_ratio = max(next_ratio, round(best_ratio * 0.70, 3))
 
@@ -690,6 +861,11 @@ def cmd_run(
         selected_ratio = best_ratio
         observed_concurrency = best_observed_concurrency
         _save_tuning_hint_ratio(tuning_key, selected_ratio)
+        _update_gpu_calibration(
+            key=gpu_calibration_key,
+            observed_ratio=selected_ratio,
+            base_required_ratio=base_required_ratio,
+        )
 
         console.print("[bold green]✅ Model launched[/bold green]")
         console.print(f"Container: [cyan]{container.name}[/cyan]")

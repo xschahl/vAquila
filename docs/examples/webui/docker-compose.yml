@@ -1,0 +1,48 @@
+services:
+  vaq-webui:
+    # Use the official vAquila Beta image
+    image: ${VAQ_IMAGE:-ghcr.io/xschahl/vaquila:v0.1.0-beta.1}
+    gpus: all
+    container_name: vaq-webui
+    restart: unless-stopped
+    ports:
+      # Expose the Web UI on port 8787
+      - "8787:8787"
+    volumes:
+      # Required for vAquila to spawn vLLM containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Recommended: Mount host HF cache to avoid re-downloading models
+      - ${VAQ_HF_CACHE_HOST_PATH:-~/.cache/huggingface}:/root/.cache/huggingface
+    environment:
+      # Used by vAquila when starting vLLM containers
+      - VAQ_HF_CACHE_HOST_PATH=${VAQ_HF_CACHE_HOST_PATH:-~/.cache/huggingface}
+      - VAQ_VLLM_IMAGE=${VAQ_VLLM_IMAGE:-vllm/vllm-openai:latest}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # Override the default command to start the Web UI
+    # We bind to 0.0.0.0 so the port is accessible from outside the container
+    command: ["ui", "--host", "0.0.0.0", "--port", "8787"]
+
+  # ---------------------------------------------------------------------------
+  # ALTERNATE CONFIGURATION (Build from scratch using Debian)
+  # ---------------------------------------------------------------------------
+  # If you prefer to build the environment from scratch, comment out the service
+  # above and uncomment the one below. Ensure you have the provided Dockerfile
+  # in the same directory.
+  #
+  # vaq-webui-custom:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   gpus: all
+  #   container_name: vaq-webui-custom
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8787:8787"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - ${VAQ_HF_CACHE_HOST_PATH:-~/.cache/huggingface}:/root/.cache/huggingface
+  #   environment:
+  #     - VAQ_HF_CACHE_HOST_PATH=${VAQ_HF_CACHE_HOST_PATH:-~/.cache/huggingface}
+  #     - NVIDIA_VISIBLE_DEVICES=all
+  #     - NVIDIA_DRIVER_CAPABILITIES=compute,utility

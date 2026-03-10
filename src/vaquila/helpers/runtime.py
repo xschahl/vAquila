@@ -34,18 +34,18 @@ def estimate_required_ratio(
 ) -> float:
     """Estimate the minimum GPU ratio required by runtime settings."""
     context_factor = max_model_len / 16384
-    ratio = 0.02
-    ratio += 0.001 * max_num_seqs
-    ratio += 0.02 * context_factor
+    heuristic_ratio = 0.02
+    heuristic_ratio += 0.001 * max_num_seqs
+    heuristic_ratio += 0.02 * context_factor
     if tool_call_parser:
-        ratio += 0.002
+        heuristic_ratio += 0.002
     if reasoning_parser:
-        ratio += 0.002
+        heuristic_ratio += 0.002
     if enable_thinking:
-        ratio += 0.001
+        heuristic_ratio += 0.001
 
     if kv_cache_dtype == "fp8":
-        ratio *= 0.78
+        heuristic_ratio *= 0.78
 
     quantization_factor = {
         "fp8": 0.82,
@@ -55,7 +55,9 @@ def estimate_required_ratio(
         "marlin": 0.75,
     }
     if quantization:
-        ratio *= quantization_factor.get(quantization, 0.90)
+        heuristic_ratio *= quantization_factor.get(quantization, 0.90)
+
+    ratio = heuristic_ratio
 
     if model_id and total_vram_gb and total_vram_gb > 0:
         analytic_ratio = estimate_required_ratio_from_model_profile(
@@ -67,7 +69,19 @@ def estimate_required_ratio(
             total_vram_gb=total_vram_gb,
         )
         if analytic_ratio is not None:
-            ratio = max(ratio, analytic_ratio)
+            # Prefer profile-based estimation for first-run precision.
+            # Keep a small safety margin for allocator and block-size effects.
+            conservative_analytic = (analytic_ratio * 1.08) + 0.004
+
+            # Heuristics still matter when close to analytic value, but cap their impact.
+            # This avoids large first-run over-allocation when heuristic is too pessimistic.
+            if heuristic_ratio <= analytic_ratio * 1.15:
+                ratio = max(conservative_analytic, heuristic_ratio)
+            else:
+                ratio = conservative_analytic
+
+            # Never inflate beyond a bounded offset above analytic estimate.
+            ratio = min(ratio, analytic_ratio + 0.06)
 
     return max(0.02, min(ratio, 0.90))
 
@@ -180,6 +194,77 @@ def estimate_max_num_seqs_from_model_profile(
         return 0
 
     return max(0, floor(remaining_gb / per_seq_gb))
+
+
+def suggest_runtime_fallbacks_from_vram_budget(
+    model_id: str,
+    max_num_seqs: int,
+    max_model_len: int,
+    kv_cache_dtype: str,
+    quantization: str | None,
+    total_vram_gb: float,
+    max_available_ratio: float,
+) -> dict[str, object]:
+    """Build actionable fallback recommendations for a VRAM pre-check failure."""
+    available_vram_gb = max(0.0, total_vram_gb * max_available_ratio)
+    result: dict[str, object] = {
+        "available_vram_gb": available_vram_gb,
+        "current_breakdown": None,
+        "estimated_max_num_seqs": None,
+        "estimated_max_model_len": None,
+        "quantization_suggestions": [],
+    }
+
+    breakdown = estimate_vram_breakdown_from_model_profile(
+        model_id=model_id,
+        max_num_seqs=max_num_seqs,
+        max_model_len=max_model_len,
+        kv_cache_dtype=kv_cache_dtype,
+        quantization=quantization,
+    )
+    if breakdown is None:
+        return result
+
+    result["current_breakdown"] = breakdown
+
+    estimated_max_num_seqs = estimate_max_num_seqs_from_model_profile(
+        model_id=model_id,
+        max_model_len=max_model_len,
+        kv_cache_dtype=kv_cache_dtype,
+        quantization=quantization,
+        available_vram_gb=available_vram_gb,
+    )
+    result["estimated_max_num_seqs"] = estimated_max_num_seqs
+
+    fixed_gb = breakdown["weights_gb"] + breakdown["runtime_overhead_gb"]
+    if max_num_seqs > 0 and available_vram_gb > fixed_gb:
+        per_token_gb = (breakdown["kv_cache_gb"] / max_num_seqs) / max(1, max_model_len)
+        if per_token_gb > 0:
+            max_model_len_fit = int((available_vram_gb - fixed_gb) / per_token_gb)
+            result["estimated_max_model_len"] = max(0, max_model_len_fit)
+
+    quant_candidates = ["fp8", "awq", "gptq", "bitsandbytes", None]
+    quant_suggestions: list[tuple[str, float]] = []
+    for candidate in quant_candidates:
+        if candidate == quantization:
+            continue
+
+        ratio = estimate_required_ratio_from_model_profile(
+            model_id=model_id,
+            max_num_seqs=max_num_seqs,
+            max_model_len=max_model_len,
+            kv_cache_dtype=kv_cache_dtype,
+            quantization=candidate,
+            total_vram_gb=total_vram_gb,
+        )
+        if ratio is None:
+            continue
+        if ratio <= max_available_ratio:
+            quant_suggestions.append((candidate or "none", ratio))
+
+    quant_suggestions.sort(key=lambda item: item[1])
+    result["quantization_suggestions"] = quant_suggestions[:3]
+    return result
 
 
 def _extract_attention_profile(payload: dict[str, object]) -> tuple[int, int, int, int, int] | None:

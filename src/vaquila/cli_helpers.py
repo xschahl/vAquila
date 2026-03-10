@@ -25,6 +25,7 @@ from vaquila.helpers.rebalance import (
 from vaquila.helpers.runtime import (
     estimate_required_ratio,
     estimate_max_num_seqs_from_model_profile,
+    suggest_runtime_fallbacks_from_vram_budget,
     extract_kv_cache_memory_bounds,
     is_retryable_vram_error,
     normalize_optional_text,
@@ -52,6 +53,7 @@ __all__ = [
     "dir_size_bytes",
     "estimate_required_ratio",
     "estimate_max_num_seqs_from_model_profile",
+    "suggest_runtime_fallbacks_from_vram_budget",
     "estimate_shared_ratio_before_rebalance",
     "extract_kv_cache_memory_bounds",
     "extract_kv_max_concurrency",

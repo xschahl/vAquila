@@ -4,11 +4,13 @@ title: Web UI
 
 ## Start Web UI
 
+You can start the Web UI easily using the [dedicated Docker examples on GitHub](https://github.com/xschahl/vaquila/tree/main/docs/examples/webui) or run it locally with the official image:
+
 ```bash
-docker compose run --rm -p 8787:8787 vaq ui --host 0.0.0.0 --port 8787
+docker compose -f docs/examples/webui/docker-compose.yml up -d
 ```
 
-Open: `http://localhost:8787`
+Open your browser at: `http://localhost:8787`
 
 ## Preview
 
