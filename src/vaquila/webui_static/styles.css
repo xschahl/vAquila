@@ -1018,13 +1018,26 @@ button:hover,
   flex-wrap: wrap;
 }
 
+/* --- Run estimate card --- */
 .run-estimate {
-  border-radius: 14px;
+  border-radius: 16px;
   border: 1px solid rgba(88, 167, 255, 0.22);
-  background: rgba(88, 167, 255, 0.06);
-  padding: 11px 12px;
+  background: rgba(88, 167, 255, 0.04);
+  padding: 14px 16px;
   display: grid;
-  gap: 6px;
+  gap: 12px;
+  transition: border-color 280ms ease, background 280ms ease;
+}
+
+.run-estimate-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.run-estimate-icon {
+  font-size: 1.15rem;
+  line-height: 1;
 }
 
 .run-estimate-status {
@@ -1033,15 +1046,203 @@ button:hover,
   color: var(--text);
 }
 
-.run-estimate-metrics {
-  font-size: 0.81rem;
-  color: var(--muted);
-  line-height: 1.45;
+/* --- Segmented bar --- */
+.estimate-bar-wrap {
+  display: grid;
+  gap: 8px;
 }
 
+.estimate-bar-track {
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 2px;
+}
+
+.estimate-segment {
+  position: relative;
+  display: block;
+  min-width: 0;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 400ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms ease;
+  width: 0;
+}
+
+.estimate-segment:hover {
+  filter: brightness(1.15);
+}
+
+.estimate-seg-weights {
+  background: linear-gradient(90deg, #6c8dd6, #7ba0e8);
+}
+
+.estimate-seg-kv {
+  background: linear-gradient(90deg, #d49a5c, #e0b377);
+}
+
+.estimate-seg-overhead {
+  background: linear-gradient(90deg, #9e72c7, #b48cda);
+}
+
+.estimate-seg-free {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Segment tooltips */
+.estimate-segment::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 9px);
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  font-size: 0.73rem;
+  color: #ecf4ff;
+  background: rgba(10, 15, 26, 0.96);
+  border: 1px solid rgba(167, 185, 210, 0.28);
+  border-radius: 8px;
+  padding: 5px 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  transition: opacity 120ms ease;
+  z-index: 3;
+}
+
+.estimate-segment:hover::after {
+  opacity: 1;
+}
+
+.estimate-bar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.estimate-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.estimate-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.estimate-legend-dot.seg-weights {
+  background: #7ba0e8;
+}
+
+.estimate-legend-dot.seg-kv {
+  background: #d49a5c;
+}
+
+.estimate-legend-dot.seg-overhead {
+  background: #9e72c7;
+}
+
+.estimate-legend-dot.seg-free {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* --- Metrics grid --- */
+.estimate-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.estimate-metric-card {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px 11px;
+  display: grid;
+  gap: 3px;
+  text-align: center;
+}
+
+.estimate-metric-label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+
+.estimate-metric-value {
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.estimate-metric-unit {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* --- Footer / confidence --- */
+.estimate-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.estimate-confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.estimate-confidence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: background 280ms ease, box-shadow 280ms ease;
+}
+
+.estimate-confidence-dot.confidence-high {
+  background: var(--teal);
+  box-shadow: 0 0 6px rgba(64, 211, 178, 0.45);
+}
+
+.estimate-confidence-dot.confidence-medium {
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(214, 161, 95, 0.4);
+}
+
+.estimate-confidence-dot.confidence-low {
+  background: var(--crimson);
+  box-shadow: 0 0 6px rgba(212, 106, 131, 0.4);
+}
+
+.estimate-footer-meta {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+/* --- State variants --- */
 .run-estimate.state-ok {
   border-color: rgba(64, 211, 178, 0.34);
-  background: rgba(64, 211, 178, 0.08);
+  background: rgba(64, 211, 178, 0.06);
 }
 
 .run-estimate.state-ok .run-estimate-status {
@@ -1050,7 +1251,7 @@ button:hover,
 
 .run-estimate.state-warn {
   border-color: rgba(214, 161, 95, 0.42);
-  background: rgba(214, 161, 95, 0.11);
+  background: rgba(214, 161, 95, 0.08);
 }
 
 .run-estimate.state-warn .run-estimate-status {
@@ -1059,11 +1260,51 @@ button:hover,
 
 .run-estimate.state-error {
   border-color: rgba(212, 106, 131, 0.45);
-  background: rgba(212, 106, 131, 0.11);
+  background: rgba(212, 106, 131, 0.08);
 }
 
 .run-estimate.state-error .run-estimate-status {
   color: var(--crimson);
+}
+
+/* Light theme overrides for estimate card */
+body[data-theme="light"] .estimate-bar-track {
+  border-color: rgba(104, 124, 150, 0.2);
+  background: rgba(15, 29, 49, 0.06);
+}
+
+body[data-theme="light"] .estimate-segment::after {
+  color: #1b2c42;
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(104, 124, 150, 0.3);
+  box-shadow: 0 8px 18px rgba(17, 32, 52, 0.14);
+}
+
+body[data-theme="light"] .estimate-seg-free {
+  background: rgba(15, 29, 49, 0.1);
+}
+
+body[data-theme="light"] .estimate-metric-card {
+  border-color: rgba(104, 124, 150, 0.16);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+body[data-theme="light"] .estimate-legend-dot {
+  box-shadow: 0 0 0 1px rgba(15, 29, 49, 0.15);
+}
+
+body[data-theme="light"] .estimate-legend-dot.seg-free {
+  background: rgba(15, 29, 49, 0.14);
+}
+
+body[data-theme="light"] .estimate-footer {
+  border-top-color: rgba(104, 124, 150, 0.14);
+}
+
+@media (max-width: 600px) {
+  .estimate-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .response-block {

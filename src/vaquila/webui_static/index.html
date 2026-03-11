@@ -355,11 +355,68 @@
                 >
               </div>
               <div class="run-estimate span-2" id="run-estimate-card">
-                <div class="run-estimate-status" id="run-estimate-status">
-                  Fill the run fields to compute an analytical VRAM estimate.
+                <div class="run-estimate-header">
+                  <span class="run-estimate-icon" id="run-estimate-icon">⚡</span>
+                  <span class="run-estimate-status" id="run-estimate-status">
+                    Fill the run fields to compute an analytical VRAM estimate.
+                  </span>
                 </div>
-                <div class="run-estimate-metrics" id="run-estimate-metrics">
-                  Waiting for input...
+                <div class="estimate-bar-wrap" id="estimate-bar-wrap">
+                  <div class="estimate-bar-track" id="estimate-bar-track">
+                    <span class="estimate-segment estimate-seg-weights" id="estimate-seg-weights"
+                      data-tooltip="Model weights"></span>
+                    <span class="estimate-segment estimate-seg-kv" id="estimate-seg-kv"
+                      data-tooltip="KV cache"></span>
+                    <span class="estimate-segment estimate-seg-overhead" id="estimate-seg-overhead"
+                      data-tooltip="Runtime overhead"></span>
+                    <span class="estimate-segment estimate-seg-free" id="estimate-seg-free"
+                      data-tooltip="Free VRAM"></span>
+                  </div>
+                  <div class="estimate-bar-legend">
+                    <span class="estimate-legend-item"><span class="estimate-legend-dot seg-weights"></span>Weights</span>
+                    <span class="estimate-legend-item"><span class="estimate-legend-dot seg-kv"></span>KV cache</span>
+                    <span class="estimate-legend-item"><span class="estimate-legend-dot seg-overhead"></span>Overhead</span>
+                    <span class="estimate-legend-item"><span class="estimate-legend-dot seg-free"></span>Free</span>
+                  </div>
+                </div>
+                <div class="estimate-metrics-grid" id="estimate-metrics-grid">
+                  <div class="estimate-metric-card">
+                    <span class="estimate-metric-label">Weights</span>
+                    <strong class="estimate-metric-value" id="em-weights">—</strong>
+                    <span class="estimate-metric-unit">GiB</span>
+                  </div>
+                  <div class="estimate-metric-card">
+                    <span class="estimate-metric-label">KV cache</span>
+                    <strong class="estimate-metric-value" id="em-kv">—</strong>
+                    <span class="estimate-metric-unit">GiB</span>
+                  </div>
+                  <div class="estimate-metric-card">
+                    <span class="estimate-metric-label">Overhead</span>
+                    <strong class="estimate-metric-value" id="em-overhead">—</strong>
+                    <span class="estimate-metric-unit">GiB</span>
+                  </div>
+                  <div class="estimate-metric-card">
+                    <span class="estimate-metric-label">Total est.</span>
+                    <strong class="estimate-metric-value" id="em-total">—</strong>
+                    <span class="estimate-metric-unit">GiB</span>
+                  </div>
+                  <div class="estimate-metric-card">
+                    <span class="estimate-metric-label">Available</span>
+                    <strong class="estimate-metric-value" id="em-available">—</strong>
+                    <span class="estimate-metric-unit">GiB</span>
+                  </div>
+                  <div class="estimate-metric-card">
+                    <span class="estimate-metric-label">Max seqs</span>
+                    <strong class="estimate-metric-value" id="em-maxseqs">—</strong>
+                    <span class="estimate-metric-unit">estimated</span>
+                  </div>
+                </div>
+                <div class="estimate-footer" id="estimate-footer">
+                  <span class="estimate-confidence" id="estimate-confidence">
+                    <span class="estimate-confidence-dot" id="estimate-confidence-dot"></span>
+                    <span id="estimate-confidence-label">Waiting for input…</span>
+                  </span>
+                  <span class="estimate-footer-meta" id="estimate-footer-meta"></span>
                 </div>
               </div>
             </form>

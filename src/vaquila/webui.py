@@ -25,7 +25,9 @@ from vaquila.cli_helpers import (
     dir_size_bytes,
     estimate_max_num_seqs_from_model_profile,
     estimate_required_ratio,
+    hub_cache_root,
     list_cached_model_dirs,
+    model_cache_repo_dir,
     purge_model_cache,
     resolve_kv_cache_dtype,
     resolve_quantization_strategy,
@@ -961,12 +963,24 @@ def create_web_app() -> FastAPI:
             available_vram_gb=available_vram_gb,
         )
 
+        # Resolve disk size for fallback estimation
+        disk_size_bytes: int | None = None
+        try:
+            repo_dir = hub_cache_root() / model_cache_repo_dir(payload.model_id)
+            if repo_dir.exists():
+                disk_size_bytes = dir_size_bytes(repo_dir)
+                if disk_size_bytes <= 0:
+                    disk_size_bytes = None
+        except Exception:
+            disk_size_bytes = None
+
         breakdown = estimate_vram_breakdown_from_model_profile(
             model_id=payload.model_id,
             max_num_seqs=payload.max_num_seqs,
             max_model_len=payload.max_model_len,
             kv_cache_dtype=resolved_kv_cache_dtype,
             quantization=resolved_quantization,
+            disk_size_bytes=disk_size_bytes,
         )
 
         fits_current_settings = max_available_ratio >= required_ratio
@@ -981,11 +995,13 @@ def create_web_app() -> FastAPI:
         rounded_breakdown = None
         if breakdown is not None:
             rounded_breakdown = {
-                "weights_gb": round(breakdown["weights_gb"], 2),
-                "kv_cache_gb": round(breakdown["kv_cache_gb"], 2),
-                "runtime_overhead_gb": round(breakdown["runtime_overhead_gb"], 2),
-                "total_gb": round(breakdown["total_gb"], 2),
-                "kv_token_kib": round(breakdown["kv_token_bytes"] / 1024, 2),
+                "weights_gb": round(float(breakdown["weights_gb"]), 2),
+                "kv_cache_gb": round(float(breakdown["kv_cache_gb"]), 2),
+                "runtime_overhead_gb": round(float(breakdown["runtime_overhead_gb"]), 2),
+                "total_gb": round(float(breakdown["total_gb"]), 2),
+                "kv_token_kib": round(float(breakdown["kv_token_bytes"]) / 1024, 2),
+                "estimation_source": str(breakdown.get("estimation_source", "unknown")),
+                "estimation_confidence": str(breakdown.get("estimation_confidence", "medium")),
             }
 
         return {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from math import floor
+from math import ceil, floor
 
 import typer
 
@@ -11,6 +11,7 @@ from vaquila.helpers.cache import resolve_model_config
 from vaquila.exceptions import VaquilaError
 
 _GIB = 1024**3
+_VLLM_BLOCK_SIZE = 16
 
 
 def normalize_optional_text(value: str | None) -> str | None:
@@ -93,6 +94,7 @@ def estimate_required_ratio_from_model_profile(
     kv_cache_dtype: str,
     quantization: str | None,
     total_vram_gb: float,
+    disk_size_bytes: int | None = None,
 ) -> float | None:
     """Estimate GPU ratio from model profile (weights + KV cache + runtime overhead)."""
     breakdown = estimate_vram_breakdown_from_model_profile(
@@ -101,6 +103,7 @@ def estimate_required_ratio_from_model_profile(
         max_model_len=max_model_len,
         kv_cache_dtype=kv_cache_dtype,
         quantization=quantization,
+        disk_size_bytes=disk_size_bytes,
     )
     if breakdown is None:
         return None
@@ -116,7 +119,8 @@ def estimate_vram_breakdown_from_model_profile(
     max_model_len: int,
     kv_cache_dtype: str,
     quantization: str | None,
-) -> dict[str, float] | None:
+    disk_size_bytes: int | None = None,
+) -> dict[str, object] | None:
     """Estimate VRAM components from model config using weights + KV cache + overhead."""
     payload = resolve_model_config(model_id)
     if not isinstance(payload, dict):
@@ -128,27 +132,49 @@ def estimate_vram_breakdown_from_model_profile(
 
     hidden_size, num_layers, num_heads, num_kv_heads, head_dim = profile
     vocab_size = _read_positive_int(payload, "vocab_size")
+    intermediate_size = _read_positive_int(payload, "intermediate_size", "d_inner", "ffn_dim")
 
+    # --- KV cache with vLLM block-size alignment ---
     kv_bytes_per_elem = 1 if kv_cache_dtype == "fp8" else 2
     kv_token_bytes = 2 * num_layers * num_kv_heads * head_dim * kv_bytes_per_elem
-    kv_cache_bytes = kv_token_bytes * max_model_len * max_num_seqs
+    aligned_tokens_per_seq = ceil(max_model_len / _VLLM_BLOCK_SIZE) * _VLLM_BLOCK_SIZE
+    kv_cache_bytes = kv_token_bytes * aligned_tokens_per_seq * max_num_seqs
+    # Block table metadata overhead (~1%)
+    block_table_bytes = int(kv_cache_bytes * 0.01)
+    kv_cache_bytes += block_table_bytes
     kv_cache_gb = kv_cache_bytes / _GIB
 
-    estimated_params = _estimate_parameter_count(
+    # --- Model weights ---
+    estimated_params, estimation_source = _estimate_parameter_count(
         model_id=model_id,
         hidden_size=hidden_size,
         num_layers=num_layers,
         vocab_size=vocab_size,
         payload=payload,
+        intermediate_size=intermediate_size,
+        disk_size_bytes=disk_size_bytes,
+        quantization=quantization,
     )
     weight_bytes_per_param = _bytes_per_param_for_quantization(quantization)
     weights_gb = (estimated_params * weight_bytes_per_param) / _GIB
 
+    # --- Runtime overhead (model-size-aware) ---
     runtime_overhead_gb = _estimate_runtime_overhead_gb(
         weights_gb=weights_gb,
         kv_cache_gb=kv_cache_gb,
+        num_layers=num_layers,
+        hidden_size=hidden_size,
     )
     total_gb = weights_gb + kv_cache_gb + runtime_overhead_gb
+
+    # --- Estimation confidence ---
+    confidence_map = {
+        "config_explicit": "high",
+        "model_name": "medium",
+        "config_intermediate": "high",
+        "config_architecture": "medium",
+        "disk_size_fallback": "low",
+    }
 
     return {
         "weights_gb": weights_gb,
@@ -156,6 +182,8 @@ def estimate_vram_breakdown_from_model_profile(
         "runtime_overhead_gb": runtime_overhead_gb,
         "total_gb": total_gb,
         "kv_token_bytes": float(kv_token_bytes),
+        "estimation_source": estimation_source,
+        "estimation_confidence": confidence_map.get(estimation_source, "medium"),
     }
 
 
@@ -165,6 +193,7 @@ def estimate_max_num_seqs_from_model_profile(
     kv_cache_dtype: str,
     quantization: str | None,
     available_vram_gb: float,
+    disk_size_bytes: int | None = None,
 ) -> int | None:
     """Estimate the maximum sustainable max-num-seqs for a given VRAM budget."""
     if available_vram_gb <= 0:
@@ -176,6 +205,7 @@ def estimate_max_num_seqs_from_model_profile(
         max_model_len=max_model_len,
         kv_cache_dtype=kv_cache_dtype,
         quantization=quantization,
+        disk_size_bytes=disk_size_bytes,
     )
     two_seq = estimate_vram_breakdown_from_model_profile(
         model_id=model_id,
@@ -183,12 +213,13 @@ def estimate_max_num_seqs_from_model_profile(
         max_model_len=max_model_len,
         kv_cache_dtype=kv_cache_dtype,
         quantization=quantization,
+        disk_size_bytes=disk_size_bytes,
     )
     if one_seq is None or two_seq is None:
         return None
 
-    fixed_gb = one_seq["weights_gb"] + one_seq["runtime_overhead_gb"]
-    per_seq_gb = max(0.000001, two_seq["kv_cache_gb"] - one_seq["kv_cache_gb"])
+    fixed_gb = float(one_seq["weights_gb"]) + float(one_seq["runtime_overhead_gb"])
+    per_seq_gb = max(0.000001, float(two_seq["kv_cache_gb"]) - float(one_seq["kv_cache_gb"]))
     remaining_gb = available_vram_gb - fixed_gb
     if remaining_gb <= 0:
         return 0
@@ -204,6 +235,7 @@ def suggest_runtime_fallbacks_from_vram_budget(
     quantization: str | None,
     total_vram_gb: float,
     max_available_ratio: float,
+    disk_size_bytes: int | None = None,
 ) -> dict[str, object]:
     """Build actionable fallback recommendations for a VRAM pre-check failure."""
     available_vram_gb = max(0.0, total_vram_gb * max_available_ratio)
@@ -221,6 +253,7 @@ def suggest_runtime_fallbacks_from_vram_budget(
         max_model_len=max_model_len,
         kv_cache_dtype=kv_cache_dtype,
         quantization=quantization,
+        disk_size_bytes=disk_size_bytes,
     )
     if breakdown is None:
         return result
@@ -233,6 +266,7 @@ def suggest_runtime_fallbacks_from_vram_budget(
         kv_cache_dtype=kv_cache_dtype,
         quantization=quantization,
         available_vram_gb=available_vram_gb,
+        disk_size_bytes=disk_size_bytes,
     )
     result["estimated_max_num_seqs"] = estimated_max_num_seqs
 
@@ -302,8 +336,14 @@ def _estimate_parameter_count(
     num_layers: int,
     vocab_size: int | None,
     payload: dict[str, object],
-) -> float:
-    """Estimate model parameter count, preferring explicit metadata when available."""
+    intermediate_size: int | None = None,
+    disk_size_bytes: int | None = None,
+    quantization: str | None = None,
+) -> tuple[float, str]:
+    """Estimate model parameter count, preferring explicit metadata when available.
+
+    Return ``(estimated_params, estimation_source)``.
+    """
     explicit_params = _read_positive_int(
         payload,
         "num_parameters",
@@ -312,17 +352,41 @@ def _estimate_parameter_count(
         "params",
     )
     if explicit_params is not None:
-        return float(explicit_params)
+        return float(explicit_params), "config_explicit"
 
     model_id_params = _extract_params_from_model_id(model_id)
     if model_id_params is not None:
-        return model_id_params
+        return model_id_params, "model_name"
 
-    transformer_params = 12.0 * num_layers * (hidden_size**2)
+    # Prefer intermediate_size-based formula for LLaMA/Qwen-style architectures
+    if intermediate_size is not None and intermediate_size > 0:
+        # Attention: Q, K, V, O projections = 4 * H^2
+        # FFN (gate_proj, up_proj, down_proj) = 3 * H * I
+        per_layer = 4.0 * (hidden_size ** 2) + 3.0 * hidden_size * intermediate_size
+        transformer_params = float(num_layers) * per_layer
+        embedding_params = 0.0
+        if vocab_size and vocab_size > 0:
+            embedding_params = 2.0 * vocab_size * hidden_size
+        return transformer_params + embedding_params, "config_intermediate"
+
+    # Classic transformer heuristic (12 * L * H^2)
+    transformer_params = 12.0 * num_layers * (hidden_size ** 2)
     embedding_params = 0.0
     if vocab_size and vocab_size > 0:
         embedding_params = 2.0 * vocab_size * hidden_size
-    return transformer_params + embedding_params
+    arch_estimate = transformer_params + embedding_params
+
+    # Disk-size fallback when architecture heuristic might be unreliable
+    if disk_size_bytes is not None and disk_size_bytes > 0:
+        bytes_per_param = _bytes_per_param_for_quantization(quantization)
+        # ~5% of disk is non-weight files (tokenizer, config, etc.)
+        weight_bytes = disk_size_bytes * 0.95
+        disk_params = weight_bytes / bytes_per_param
+        # Use disk estimate only if it differs significantly from architecture
+        if arch_estimate > 0 and abs(disk_params - arch_estimate) / arch_estimate > 0.3:
+            return disk_params, "disk_size_fallback"
+
+    return arch_estimate, "config_architecture"
 
 
 def _extract_params_from_model_id(model_id: str) -> float | None:
@@ -356,11 +420,34 @@ def _bytes_per_param_for_quantization(quantization: str | None) -> float:
     return 1.4
 
 
-def _estimate_runtime_overhead_gb(weights_gb: float, kv_cache_gb: float) -> float:
-    """Estimate runtime overhead (CUDA context, PyTorch allocator, vLLM internals)."""
-    base_overhead = 1.5
-    dynamic_overhead = (weights_gb * 0.03) + (kv_cache_gb * 0.02)
-    return max(base_overhead, min(3.0, base_overhead + dynamic_overhead))
+def _estimate_runtime_overhead_gb(
+    weights_gb: float,
+    kv_cache_gb: float,
+    num_layers: int = 32,
+    hidden_size: int = 4096,
+) -> float:
+    """Estimate runtime overhead (CUDA context, PyTorch allocator, vLLM internals).
+
+    Model-size-aware: scales with architecture dimensions instead of using
+    a hard cap, so large models (70B+) get a proportionally larger budget.
+    """
+    # CUDA context baseline (driver + context init)
+    cuda_context = 0.5
+
+    # PyTorch memory allocator cache and fragmentation
+    allocator = max(0.2, weights_gb * 0.04)
+
+    # vLLM sampling / logits buffers (scales with hidden_size)
+    vllm_buffers = max(0.15, (hidden_size / 4096) * 0.2)
+
+    # Block table metadata (grows slowly with KV cache)
+    block_metadata = kv_cache_gb * 0.01
+
+    # Activation memory during forward pass
+    activation = num_layers * (hidden_size / 4096) * 0.005
+
+    total = cuda_context + allocator + vllm_buffers + block_metadata + activation
+    return max(1.0, total)
 
 
 def resolve_kv_cache_dtype(kv_cache_dtype: str | None) -> str:

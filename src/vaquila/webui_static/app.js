@@ -385,86 +385,188 @@ function formatEstimateRatio(value) {
   return value.toFixed(3);
 }
 
-function setRunEstimateState(state, statusText, metricsText) {
-  if (!runEstimateCard || !runEstimateStatus || !runEstimateMetrics) return;
+function setRunEstimateState(state, statusText, options = {}) {
+  if (!runEstimateCard) return;
+
+  const icon = document.getElementById("run-estimate-icon");
+  const status = document.getElementById("run-estimate-status");
+  const barWrap = document.getElementById("estimate-bar-wrap");
+  const metricsGrid = document.getElementById("estimate-metrics-grid");
+  const footer = document.getElementById("estimate-footer");
 
   runEstimateCard.classList.remove("state-ok", "state-warn", "state-error");
   if (state === "ok") runEstimateCard.classList.add("state-ok");
   if (state === "warn") runEstimateCard.classList.add("state-warn");
   if (state === "error") runEstimateCard.classList.add("state-error");
 
-  runEstimateStatus.textContent = statusText;
-  runEstimateMetrics.textContent = metricsText;
+  const icons = { ok: "✅", warn: "⚠️", error: "❌", loading: "⏳", idle: "⚡" };
+  if (icon) icon.textContent = icons[state] || icons.idle;
+  if (status) status.textContent = statusText;
+
+  const showDetails = !!options.breakdown || state === "loading";
+  const isLoading = state === "loading";
+
+  if (barWrap) {
+    barWrap.style.display = showDetails ? "" : "none";
+    barWrap.style.opacity = isLoading ? "0.4" : "1";
+    barWrap.style.transition = "opacity 0.2s ease";
+  }
+  if (metricsGrid) {
+    metricsGrid.style.display = showDetails ? "" : "none";
+    metricsGrid.style.opacity = isLoading ? "0.4" : "1";
+    metricsGrid.style.transition = "opacity 0.2s ease";
+  }
+  if (footer) {
+    footer.style.display = showDetails || options.footerText ? "" : "none";
+  }
+
+  // Segmented bar
+  const segWeights = document.getElementById("estimate-seg-weights");
+  const segKv = document.getElementById("estimate-seg-kv");
+  const segOverhead = document.getElementById("estimate-seg-overhead");
+  const segFree = document.getElementById("estimate-seg-free");
+
+  if (showDetails && options.segments) {
+    const s = options.segments;
+    if (segWeights) {
+      segWeights.style.width = `${s.weightsPct}%`;
+      segWeights.dataset.tooltip = `Weights: ${s.weightsGb} GiB (${s.weightsPct.toFixed(1)}%)`;
+    }
+    if (segKv) {
+      segKv.style.width = `${s.kvPct}%`;
+      segKv.dataset.tooltip = `KV cache: ${s.kvGb} GiB (${s.kvPct.toFixed(1)}%)`;
+    }
+    if (segOverhead) {
+      segOverhead.style.width = `${s.overheadPct}%`;
+      segOverhead.dataset.tooltip = `Overhead: ${s.overheadGb} GiB (${s.overheadPct.toFixed(1)}%)`;
+    }
+    if (segFree) {
+      segFree.style.width = `${s.freePct}%`;
+      segFree.dataset.tooltip = `Free: ${s.freeGb} GiB (${s.freePct.toFixed(1)}%)`;
+    }
+  } else {
+    [segWeights, segKv, segOverhead, segFree].forEach((seg) => {
+      if (seg) seg.style.width = "0";
+    });
+  }
+
+  // Metrics
+  const setMetric = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  if (options.metrics) {
+    const m = options.metrics;
+    setMetric("em-weights", m.weightsGb ?? "—");
+    setMetric("em-kv", m.kvGb ?? "—");
+    setMetric("em-overhead", m.overheadGb ?? "—");
+    setMetric("em-total", m.totalGb ?? "—");
+    setMetric("em-available", m.availableGb ?? "—");
+    setMetric("em-maxseqs", m.maxSeqs ?? "—");
+  } else {
+    ["em-weights", "em-kv", "em-overhead", "em-total", "em-available", "em-maxseqs"].forEach(
+      (id) => setMetric(id, "—"),
+    );
+  }
+
+  // Confidence
+  const confDot = document.getElementById("estimate-confidence-dot");
+  const confLabel = document.getElementById("estimate-confidence-label");
+  const footerMeta = document.getElementById("estimate-footer-meta");
+
+  if (confDot) {
+    confDot.classList.remove("confidence-high", "confidence-medium", "confidence-low");
+    if (options.confidence) {
+      confDot.classList.add(`confidence-${options.confidence}`);
+    }
+  }
+  if (confLabel) confLabel.textContent = options.confidenceLabel || "";
+  if (footerMeta) footerMeta.textContent = options.footerText || "";
 }
 
 function renderRunEstimate(result) {
   if (!result || result.ok !== true) {
-    setRunEstimateState(
-      "error",
-      "VRAM estimate unavailable",
-      result?.message || "Unable to compute estimate for this configuration.",
-    );
+    setRunEstimateState("error", result?.message || "Unable to compute estimate.");
     return;
   }
 
   if (result.manual_mode === true) {
-    const metrics = [
-      `device=${result.device || "gpu"}`,
-      `gpu_utilization=${result.gpu_utilization ?? "auto"}`,
-      `cpu_utilization=${result.cpu_utilization ?? "none"}`,
-      "estimation=disabled",
-      "optimization=disabled",
-    ];
-    setRunEstimateState(
-      "warn",
-      result.message || "Manual utilization mode enabled.",
-      metrics.join(" | "),
-    );
+    setRunEstimateState("warn", result.message || "Manual utilization mode enabled.", {
+      footerText: `device=${result.device || "gpu"} | gpu_util=${result.gpu_utilization ?? "auto"} | estimation=disabled`,
+    });
     return;
   }
 
   if (String(result.device || "gpu").toLowerCase() === "cpu") {
-    const metrics = [
-      `device=cpu`,
-      `max-num-seqs=${result.requested_max_num_seqs ?? "n/a"}`,
-      `max-model-len=${result.max_model_len ?? "n/a"}`,
-      `quantization=${result.quantization ?? "n/a"}`,
-      `kv_cache_dtype=${result.kv_cache_dtype ?? "n/a"}`,
-      `VRAM estimate disabled in CPU mode`,
-    ];
-    setRunEstimateState(
-      "ok",
-      result.message || "CPU mode selected.",
-      metrics.join(" | "),
-    );
+    setRunEstimateState("ok", result.message || "CPU mode selected.", {
+      footerText: `max-num-seqs=${result.requested_max_num_seqs ?? "n/a"} | quantization=${result.quantization ?? "n/a"}`,
+    });
     return;
   }
 
-  const estimatedMaxNumSeqs = result.estimated_max_num_seqs;
-  const requestedMaxNumSeqs = Number(result.requested_max_num_seqs || 0);
-  const fitsRequested =
-    typeof estimatedMaxNumSeqs !== "number" ||
-    requestedMaxNumSeqs <= estimatedMaxNumSeqs;
-
-  const state = result.fits_current_settings && fitsRequested ? "ok" : "warn";
   const breakdown = result.breakdown || {};
-  const statusText = result.fits_current_settings
+  const totalVramGb = Number(result.total_vram_gb || 0);
+  const availableGb = Number(result.available_vram_gb || 0);
+  const weightsGb = Number(breakdown.weights_gb || 0);
+  const kvGb = Number(breakdown.kv_cache_gb || 0);
+  const overheadGb = Number(breakdown.runtime_overhead_gb || 0);
+  const totalEstGb = Number(breakdown.total_gb || 0);
+  const estimatedMaxSeqs = result.estimated_max_num_seqs;
+  const requestedMaxSeqs = Number(result.requested_max_num_seqs || 0);
+  const fitsRequested =
+    typeof estimatedMaxSeqs !== "number" || requestedMaxSeqs <= estimatedMaxSeqs;
+
+  const fits = result.fits_current_settings && fitsRequested;
+  const state = fits ? "ok" : "warn";
+  const statusText = fits
     ? "Current settings fit available VRAM"
     : "Current settings are likely above available VRAM";
 
-  const metrics = [
-    `required ratio=${formatEstimateRatio(result.required_ratio)}`,
-    `available ratio=${formatEstimateRatio(result.max_available_ratio)}`,
-    `estimated max-num-seqs~${
-      typeof estimatedMaxNumSeqs === "number" ? estimatedMaxNumSeqs : "n/a"
-    }`,
-    `weights~${breakdown.weights_gb ?? "n/a"} GiB`,
-    `KV cache~${breakdown.kv_cache_gb ?? "n/a"} GiB`,
-    `overhead~${breakdown.runtime_overhead_gb ?? "n/a"} GiB`,
-    `buffer=${result.buffer_gb} GiB`,
-  ];
+  // Segment percentages (relative to total VRAM)
+  const denom = totalVramGb > 0 ? totalVramGb : totalEstGb || 1;
+  const weightsPct = Math.min(100, (weightsGb / denom) * 100);
+  const kvPct = Math.min(100 - weightsPct, (kvGb / denom) * 100);
+  const overheadPct = Math.min(100 - weightsPct - kvPct, (overheadGb / denom) * 100);
+  const usedPct = weightsPct + kvPct + overheadPct;
+  const freePct = Math.max(0, 100 - usedPct);
+  const freeGb = Math.max(0, denom - totalEstGb).toFixed(2);
 
-  setRunEstimateState(state, statusText, metrics.join(" | "));
+  // Confidence mapping
+  const confidence = breakdown.estimation_confidence || "medium";
+  const sourceLabels = {
+    config_explicit: "Config metadata (params count)",
+    model_name: "Extracted from model name",
+    config_intermediate: "Config analytical (intermediate_size)",
+    config_architecture: "Architecture heuristic (12×L×H²)",
+    disk_size_fallback: "Disk size fallback estimate",
+  };
+  const sourceLabel = sourceLabels[breakdown.estimation_source] || breakdown.estimation_source || "—";
+
+  setRunEstimateState(state, statusText, {
+    breakdown: true,
+    segments: {
+      weightsPct,
+      kvPct,
+      overheadPct,
+      freePct,
+      weightsGb: weightsGb.toFixed(2),
+      kvGb: kvGb.toFixed(2),
+      overheadGb: overheadGb.toFixed(2),
+      freeGb,
+    },
+    metrics: {
+      weightsGb: weightsGb.toFixed(2),
+      kvGb: kvGb.toFixed(2),
+      overheadGb: overheadGb.toFixed(2),
+      totalGb: totalEstGb.toFixed(2),
+      availableGb: availableGb.toFixed(2),
+      maxSeqs:
+        typeof estimatedMaxSeqs === "number" ? String(estimatedMaxSeqs) : "n/a",
+    },
+    confidence,
+    confidenceLabel: `${confidence} confidence — ${sourceLabel}`,
+    footerText: `buffer=${result.buffer_gb} GiB | ratio=${formatEstimateRatio(result.required_ratio)}/${formatEstimateRatio(result.max_available_ratio)} | quantization=${result.quantization ?? "auto"}`,
+  });
 }
 
 async function refreshRunEstimate() {
@@ -472,21 +574,17 @@ async function refreshRunEstimate() {
 
   const payload = getFormPayload(runForm);
   if (!payload.model_id || String(payload.model_id).trim() === "") {
-    setRunEstimateState(
-      "warn",
-      "Model ID required",
-      "Enter a model id to compute analytical capacity and VRAM estimate.",
-    );
+    setRunEstimateState("warn", "Model ID required", {
+      footerText: "Enter a model id to compute analytical capacity and VRAM estimate.",
+    });
     return;
   }
 
-  setRunEstimateState(
-    "warn",
-    "Computing estimate...",
+  const loadingMsg =
     String(payload.device || "gpu").toLowerCase() === "cpu"
       ? "CPU mode selected: checking runtime settings without VRAM constraints."
-      : "Evaluating weights, KV cache, and runtime overhead on selected GPU.",
-  );
+      : "Evaluating weights, KV cache, and runtime overhead on selected GPU.";
+  setRunEstimateState("loading", "Computing estimate…", { footerText: loadingMsg });
 
   try {
     const result = await api("/api/run/estimate", {
@@ -495,11 +593,9 @@ async function refreshRunEstimate() {
     });
     renderRunEstimate(result);
   } catch (error) {
-    setRunEstimateState(
-      "error",
-      "VRAM estimate failed",
-      error.message || "Unable to compute run estimate.",
-    );
+    setRunEstimateState("error", "VRAM estimate failed", {
+      footerText: error.message || "Unable to compute run estimate.",
+    });
   }
 }
 
