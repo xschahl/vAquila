@@ -17,6 +17,7 @@ services:
       # Used by vAquila when starting vLLM containers
       - VAQ_HF_CACHE_HOST_PATH=${VAQ_HF_CACHE_HOST_PATH:-~/.cache/huggingface}
       - VAQ_VLLM_IMAGE=${VAQ_VLLM_IMAGE:-vllm/vllm-openai:latest}
+      - VAQ_VLLM_CPU_IMAGE=${VAQ_VLLM_CPU_IMAGE:-vllm/vllm-openai-cpu:latest}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     # Override the default command to start the Web UI

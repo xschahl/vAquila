@@ -29,7 +29,7 @@ def _default_inference_base_url() -> str:
 def load_config() -> RuntimeConfig:
     """Load runtime configuration from environment variables."""
     image = os.getenv("VAQ_VLLM_IMAGE", "vllm/vllm-openai:latest")
-    cpu_image = os.getenv("VAQ_VLLM_CPU_IMAGE", image)
+    cpu_image = os.getenv("VAQ_VLLM_CPU_IMAGE", "vllm/vllm-openai-cpu:latest")
     default_host_port = int(os.getenv("VAQ_DEFAULT_HOST_PORT", "8000"))
     security_vram_buffer_gb = float(os.getenv("VAQ_SECURITY_VRAM_BUFFER_GB", "1.5"))
     hf_cache_host_path = Path(

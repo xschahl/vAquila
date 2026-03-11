@@ -199,6 +199,12 @@ def run_model_container(
         }
 
         selected_image = config.cpu_image if backend == "cpu" else config.image
+        if backend == "cpu":
+            # Safety net: if CPU image resolves to the same likely GPU image, force official CPU image.
+            normalized_cpu_image = selected_image.strip().lower()
+            normalized_gpu_image = config.image.strip().lower()
+            if normalized_cpu_image == normalized_gpu_image and "cpu" not in normalized_cpu_image:
+                selected_image = "vllm/vllm-openai-cpu:latest"
         _ensure_image_available(client, selected_image)
 
         nano_cpus: int | None = None
