@@ -21,10 +21,10 @@ command: ["ui", "--host", "0.0.0.0", "--port", "8787"]
 To run this:
 
 1. Copy `.env.example` to `.env` (at the root of the project or alongside this compose file) and configure your `VAQ_HF_CACHE_HOST_PATH`.
+   Also set `VAQ_VLLM_CPU_IMAGE` to a CPU-compatible vLLM image (for example `vllm/vllm-openai-cpu:latest`)
+   so `--device cpu` never falls back to a GPU-only runtime image.
 2. Run Compose:
-   ```bash
-   docker compose up -d
-   ```
+   `docker compose up -d`
 3. Access the UI in your browser at [http://localhost:8787](http://localhost:8787).
 
 ### Method 2: Building a Debian Environment From Scratch
@@ -36,9 +36,7 @@ To use this method:
 1. Open `docker-compose.yml`.
 2. Comment out the `vaq-webui` service and uncomment the `vaq-webui-custom` service section.
 3. Run Compose, forcing a build:
-   ```bash
-   docker compose up -d --build
-   ```
+   `docker compose up -d --build`
 4. Access the UI in your browser at [http://localhost:8787](http://localhost:8787).
 
 ## Requirements
