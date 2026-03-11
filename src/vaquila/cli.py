@@ -113,6 +113,7 @@ def run(
         device=device,
         gpu_utilization=gpu_utilization,
         cpu_utilization=cpu_utilization,
+        cpu_kv_cache_space=None,
         buffer_gb=buffer_gb,
         startup_timeout=startup_timeout,
         max_num_seqs=max_num_seqs,

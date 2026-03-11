@@ -115,6 +115,27 @@ def _ensure_cache_dir(path: Path) -> Path:
     return path
 
 
+def _normalize_cpu_kv_cache_space(cpu_kv_cache_space: int | None) -> str | None:
+    """Normalize CPU KV cache cap (GiB) to a positive integer string."""
+    if cpu_kv_cache_space is not None:
+        if cpu_kv_cache_space < 1:
+            raise VaquilaError(
+                "Invalid CPU KV cache cap. Expected an integer >= 1 GiB."
+            )
+        return str(cpu_kv_cache_space)
+
+    configured = os.getenv("VAQ_VLLM_CPU_KVCACHE_SPACE", "").strip()
+    if not configured:
+        return None
+
+    if not configured.isdigit() or int(configured) < 1:
+        raise VaquilaError(
+            "Invalid VAQ_VLLM_CPU_KVCACHE_SPACE value. Expected a positive integer (GiB), e.g. 4."
+        )
+
+    return configured
+
+
 def run_model_container(
     model_id: str,
     host_port: int,
@@ -132,6 +153,7 @@ def run_model_container(
     quantization: str | None = None,
     kv_cache_dtype: str | None = None,
     compute_backend: str = "gpu",
+    cpu_kv_cache_space: int | None = None,
 ) -> Container:
     """Create and start a vLLM container for a Hugging Face model."""
     client = _docker_client()
@@ -173,6 +195,9 @@ def run_model_container(
         if backend == "cpu":
             # Prevent vLLM from trying to infer a GPU device in CPU-only runs.
             environment["VLLM_TARGET_DEVICE"] = "cpu"
+            effective_cpu_kv_cache_space = _normalize_cpu_kv_cache_space(cpu_kv_cache_space)
+            if effective_cpu_kv_cache_space:
+                environment["VLLM_CPU_KVCACHE_SPACE"] = effective_cpu_kv_cache_space
         if allow_long_context_override:
             environment["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
 
@@ -187,6 +212,7 @@ def run_model_container(
             "com.vaquila.gpu_index": "" if gpu_index is None else str(gpu_index),
             "com.vaquila.gpu_utilization": "" if gpu_utilization is None else f"{gpu_utilization:.3f}",
             "com.vaquila.cpu_utilization": "" if cpu_utilization is None else f"{cpu_utilization:.3f}",
+            "com.vaquila.cpu_kv_cache_space": environment.get("VLLM_CPU_KVCACHE_SPACE", ""),
             "com.vaquila.max_num_seqs": str(max_num_seqs),
             "com.vaquila.max_model_len": str(max_model_len),
             "com.vaquila.tool_call_parser": tool_call_parser or "",
@@ -254,6 +280,8 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
         gpu_index: int | None = None
         gpu_used: int | None = None
         gpu_utilization: float | None = None
+        cpu_utilization: float | None = None
+        cpu_kv_cache_space: str | None = None
         max_num_seqs: int | None = None
         max_model_len: int | None = None
         tool_call_parser: str | None = None
@@ -273,6 +301,17 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
                 gpu_utilization = float(gpu_utilization_value)
             except ValueError:
                 gpu_utilization = None
+
+        cpu_utilization_value = labels.get("com.vaquila.cpu_utilization")
+        if cpu_utilization_value:
+            try:
+                cpu_utilization = float(cpu_utilization_value)
+            except ValueError:
+                cpu_utilization = None
+
+        cpu_kv_cache_space_value = labels.get("com.vaquila.cpu_kv_cache_space")
+        if cpu_kv_cache_space_value:
+            cpu_kv_cache_space = cpu_kv_cache_space_value
 
         max_num_seqs_value = labels.get("com.vaquila.max_num_seqs")
         if max_num_seqs_value is not None:
@@ -337,6 +376,8 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
                 gpu_index=gpu_index,
                 gpu_used_bytes=gpu_used,
                 gpu_utilization=gpu_utilization,
+                cpu_utilization=cpu_utilization,
+                cpu_kv_cache_space=cpu_kv_cache_space,
                 max_num_seqs=max_num_seqs,
                 max_model_len=max_model_len,
                 tool_call_parser=tool_call_parser,

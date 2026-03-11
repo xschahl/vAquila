@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import os
 import platform
+import json
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock, Thread
-from time import sleep
+from time import perf_counter, sleep
 from uuid import uuid4
 
 import typer
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
@@ -49,7 +50,7 @@ from vaquila.gpu import (
     read_gpu_snapshot,
 )
 from vaquila.helpers.runtime import estimate_vram_breakdown_from_model_profile
-from vaquila.inference import run_inference
+from vaquila.inference import run_inference, stream_inference
 
 
 @dataclass
@@ -73,6 +74,7 @@ class RunRequest(BaseModel):
     device: str = Field(default="gpu")
     gpu_utilization: float | None = Field(default=None, gt=0, le=1)
     cpu_utilization: float | None = Field(default=None, gt=0, le=1)
+    cpu_kv_cache_space: int | None = Field(default=None, ge=1)
     port: int = Field(default=CONFIG.default_host_port, ge=1, le=65535)
     gpu_index: int = Field(default=0, ge=0)
     buffer_gb: float | None = Field(default=None, gt=0)
@@ -471,6 +473,7 @@ def create_web_app() -> FastAPI:
                             gpu_index=payload.gpu_index,
                             gpu_utilization=payload.gpu_utilization,
                             cpu_utilization=payload.cpu_utilization,
+                            cpu_kv_cache_space=payload.cpu_kv_cache_space,
                             buffer_gb=payload.buffer_gb,
                             startup_timeout=payload.startup_timeout,
                             max_num_seqs=payload.max_num_seqs,
@@ -1101,5 +1104,37 @@ def create_web_app() -> FastAPI:
             return {"answer": answer, "response": answer}
         except VaquilaError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/infer/stream")
+    def infer_stream(payload: InferRequest) -> StreamingResponse:
+        """Stream inference chunks against a running model API as SSE events."""
+
+        def _sse(event: dict[str, object]) -> str:
+            return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        def _event_stream() -> object:
+            started_at = perf_counter()
+            try:
+                for event in stream_inference(
+                    base_url=payload.base_url,
+                    model_id=payload.model_id,
+                    prompt=payload.prompt,
+                    max_tokens=payload.max_tokens,
+                    temperature=payload.temperature,
+                    timeout_seconds=payload.timeout,
+                ):
+                    if isinstance(event, dict) and event.get("type") == "done":
+                        elapsed_seconds = max(0.0, perf_counter() - started_at)
+                        yield _sse({"type": "done", "elapsed_seconds": elapsed_seconds})
+                    else:
+                        yield _sse(event)
+            except VaquilaError as exc:
+                yield _sse({"type": "error", "message": str(exc)})
+
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
 
     return app

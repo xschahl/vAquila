@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 import json
+import os
 import re
 import platform
 from pathlib import Path
@@ -191,6 +192,7 @@ def cmd_run(
     gpu_index: int,
     gpu_utilization: float | None,
     cpu_utilization: float | None,
+    cpu_kv_cache_space: int | None,
     buffer_gb: float | None,
     startup_timeout: int,
     max_num_seqs: int | None,
@@ -214,6 +216,8 @@ def cmd_run(
             raise VaquilaError("Invalid --gpu-utilization value. Expected a ratio in (0, 1].")
         if cpu_utilization is not None and not (0.0 < cpu_utilization <= 1.0):
             raise VaquilaError("Invalid --cpu-utilization value. Expected a ratio in (0, 1].")
+        if cpu_kv_cache_space is not None and cpu_kv_cache_space < 1:
+            raise VaquilaError("Invalid --cpu-kv-cache-space value. Expected an integer >= 1 GiB.")
         if compute_backend == "cpu" and gpu_utilization is not None:
             raise VaquilaError("--gpu-utilization cannot be used with --device cpu.")
         if compute_backend == "gpu" and manual_mode and gpu_utilization is None:
@@ -252,6 +256,12 @@ def cmd_run(
         resolved_kv_cache_dtype = resolve_kv_cache_dtype(kv_cache_dtype)
 
         if compute_backend == "cpu":
+            configured_cpu_kv_cache = os.getenv("VAQ_VLLM_CPU_KVCACHE_SPACE", "").strip()
+            effective_cpu_kv_cache = (
+                str(cpu_kv_cache_space)
+                if cpu_kv_cache_space is not None
+                else configured_cpu_kv_cache
+            )
             console.print(
                 "[yellow]CPU mode enabled:[/yellow] GPU VRAM estimation and auto-tuning are skipped. "
                 "Startup may be significantly slower than GPU mode."
@@ -274,6 +284,16 @@ def cmd_run(
                 f"[cyan]Ensuring runtime image is available locally:[/cyan] {CONFIG.cpu_image} "
                 "(first launch may download the image and take longer)."
             )
+            if effective_cpu_kv_cache:
+                console.print(
+                    "[cyan]CPU KV cache cap:[/cyan] "
+                    f"VLLM_CPU_KVCACHE_SPACE={effective_cpu_kv_cache}"
+                )
+            else:
+                console.print(
+                    "[yellow]CPU RAM note:[/yellow] Set [cyan]VAQ_VLLM_CPU_KVCACHE_SPACE[/cyan] "
+                    "to limit vLLM CPU KV cache allocation and reduce RAM pressure."
+                )
 
             with console.status(
                 "[cyan]Creating vLLM CPU container and preparing Hugging Face download...[/cyan]",
@@ -285,6 +305,7 @@ def cmd_run(
                     gpu_index=None,
                     gpu_utilization=None,
                     cpu_utilization=cpu_utilization,
+                    cpu_kv_cache_space=cpu_kv_cache_space,
                     max_num_seqs=resolved_max_num_seqs,
                     max_model_len=resolved_max_model_len,
                     tool_call_parser=resolved_tool_call_parser,

@@ -1026,7 +1026,9 @@ button:hover,
   padding: 14px 16px;
   display: grid;
   gap: 12px;
-  transition: border-color 280ms ease, background 280ms ease;
+  transition:
+    border-color 280ms ease,
+    background 280ms ease;
 }
 
 .run-estimate-header {
@@ -1070,7 +1072,9 @@ button:hover,
   min-width: 0;
   height: 100%;
   border-radius: 999px;
-  transition: width 400ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms ease;
+  transition:
+    width 400ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 140ms ease;
   width: 0;
 }
 
@@ -1216,7 +1220,9 @@ button:hover,
   height: 8px;
   border-radius: 999px;
   background: var(--muted);
-  transition: background 280ms ease, box-shadow 280ms ease;
+  transition:
+    background 280ms ease,
+    box-shadow 280ms ease;
 }
 
 .estimate-confidence-dot.confidence-high {
@@ -1318,6 +1324,15 @@ body[data-theme="light"] .estimate-footer {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+}
+
+.infer-metrics {
+  font-size: 0.82rem;
+  color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .table-wrap {

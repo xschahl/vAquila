@@ -47,6 +47,9 @@ VAQ_VLLM_IMAGE=vllm/vllm-openai:latest
 
 # CPU runtime image used when --device cpu is selected
 VAQ_VLLM_CPU_IMAGE=vllm/vllm-openai-cpu:latest-x86_64
+
+# Optional: cap vLLM CPU KV cache size (GiB) to reduce RAM usage in CPU mode
+VAQ_VLLM_CPU_KVCACHE_SPACE=4
 ```
 
 For non-x86_64 hosts (ARM, Apple Silicon, etc.), use an architecture-specific CPU tag

@@ -28,6 +28,8 @@ class ManagedContainer:
     gpu_index: int | None
     gpu_used_bytes: int | None
     gpu_utilization: float | None
+    cpu_utilization: float | None
+    cpu_kv_cache_space: str | None
     max_num_seqs: int | None
     max_model_len: int | None
     tool_call_parser: str | None
