@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -39,6 +40,193 @@ def _candidate_base_urls(base_url: str) -> list[str]:
         _push(fallback.rstrip("/"))
 
     return candidates
+
+
+def _extract_text_from_stream_choice(choice: object) -> str:
+    """Extract incremental text from one streamed choice payload."""
+    if not isinstance(choice, dict):
+        return ""
+
+    delta = choice.get("delta")
+    if isinstance(delta, dict):
+        content = delta.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for chunk in content:
+                if isinstance(chunk, dict) and isinstance(chunk.get("text"), str):
+                    parts.append(chunk["text"])
+            return "".join(parts)
+
+    text = choice.get("text")
+    if isinstance(text, str):
+        return text
+
+    return ""
+
+
+def stream_inference(
+    base_url: str,
+    model_id: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    timeout_seconds: int,
+) -> Iterator[dict[str, object]]:
+    """Stream inference events from vLLM as token and usage payloads."""
+    if max_tokens <= 0:
+        raise VaquilaError("max_tokens must be greater than 0.")
+    if timeout_seconds <= 0:
+        raise VaquilaError("timeout must be greater than 0.")
+
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "chat_template_kwargs": {"enable_thinking": False},
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    body = json.dumps(payload).encode("utf-8")
+
+    completion_payload = {
+        "model": model_id,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    completion_body = json.dumps(completion_payload).encode("utf-8")
+
+    last_error: Exception | None = None
+    candidate_base_urls = _candidate_base_urls(base_url)
+
+    for index, candidate_base_url in enumerate(candidate_base_urls):
+        endpoint = f"{candidate_base_url.rstrip('/')}/v1/chat/completions"
+        request = Request(
+            endpoint,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+
+                    raw_data = line[5:].strip()
+                    if raw_data == "[DONE]":
+                        yield {"type": "done"}
+                        return
+
+                    try:
+                        chunk_payload = json.loads(raw_data)
+                    except json.JSONDecodeError:
+                        continue
+
+                    usage = chunk_payload.get("usage")
+                    if isinstance(usage, dict):
+                        yield {
+                            "type": "usage",
+                            "prompt_tokens": usage.get("prompt_tokens"),
+                            "completion_tokens": usage.get("completion_tokens"),
+                            "total_tokens": usage.get("total_tokens"),
+                        }
+
+                    choices = chunk_payload.get("choices")
+                    if isinstance(choices, list) and choices:
+                        text = _extract_text_from_stream_choice(choices[0])
+                        if text:
+                            yield {"type": "token", "text": text}
+
+                yield {"type": "done"}
+                return
+        except HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 400 and "chat template" in details.lower():
+                completion_endpoint = f"{candidate_base_url.rstrip('/')}/v1/completions"
+                completion_request = Request(
+                    completion_endpoint,
+                    data=completion_body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urlopen(completion_request, timeout=timeout_seconds) as response:
+                        for raw_line in response:
+                            line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not line or not line.startswith("data:"):
+                                continue
+
+                            raw_data = line[5:].strip()
+                            if raw_data == "[DONE]":
+                                yield {"type": "done"}
+                                return
+
+                            try:
+                                chunk_payload = json.loads(raw_data)
+                            except json.JSONDecodeError:
+                                continue
+
+                            usage = chunk_payload.get("usage")
+                            if isinstance(usage, dict):
+                                yield {
+                                    "type": "usage",
+                                    "prompt_tokens": usage.get("prompt_tokens"),
+                                    "completion_tokens": usage.get("completion_tokens"),
+                                    "total_tokens": usage.get("total_tokens"),
+                                }
+
+                            choices = chunk_payload.get("choices")
+                            if isinstance(choices, list) and choices:
+                                text = _extract_text_from_stream_choice(choices[0])
+                                if text:
+                                    yield {"type": "token", "text": text}
+
+                        yield {"type": "done"}
+                        return
+                except HTTPError as completion_exc:
+                    completion_details = completion_exc.read().decode("utf-8", errors="replace")
+                    last_error = VaquilaError(
+                        "vLLM API streaming failed on both chat and completion endpoints "
+                        f"at {candidate_base_url} (chat={exc.code}, completion={completion_exc.code}): "
+                        f"{completion_details}"
+                    )
+                    if index < len(candidate_base_urls) - 1:
+                        continue
+                    raise last_error from completion_exc
+                except URLError as completion_exc:
+                    last_error = VaquilaError(
+                        f"Unable to reach vLLM completions API at {candidate_base_url}. "
+                        "Verify model, port, and URL."
+                    )
+                    if index < len(candidate_base_urls) - 1:
+                        continue
+                    raise last_error from completion_exc
+
+            last_error = VaquilaError(
+                f"vLLM API streaming request failed ({exc.code}) at {candidate_base_url}: {details}"
+            )
+            if index < len(candidate_base_urls) - 1:
+                continue
+            raise last_error from exc
+        except URLError as exc:
+            last_error = VaquilaError(
+                f"Unable to reach vLLM API at {candidate_base_url}. Verify model, port, and URL."
+            )
+            if index < len(candidate_base_urls) - 1:
+                continue
+            raise last_error from exc
+
+    if isinstance(last_error, VaquilaError):
+        raise last_error
+    raise VaquilaError("Unable to stream from vLLM API.")
 
 
 def run_inference(

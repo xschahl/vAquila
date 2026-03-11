@@ -7,6 +7,7 @@ const runEstimateStatus = document.getElementById("run-estimate-status");
 const runEstimateMetrics = document.getElementById("run-estimate-metrics");
 const inferForm = document.getElementById("infer-form");
 const inferOutput = document.getElementById("infer-output");
+const inferMetrics = document.getElementById("infer-metrics");
 const inferTarget = document.getElementById("infer-target");
 const inferEndpointHint = document.getElementById("infer-endpoint-hint");
 
@@ -29,10 +30,12 @@ const runGpuField = document.getElementById("run-gpu-field");
 const runBufferField = document.getElementById("run-buffer-field");
 const runGpuUtilField = document.getElementById("run-gpu-utilization-field");
 const runCpuUtilField = document.getElementById("run-cpu-utilization-field");
+const runCpuKvCacheField = document.getElementById("run-cpu-kv-cache-field");
 const runGpuInput = document.getElementById("run-gpu-index");
 const runBufferInput = document.getElementById("run-buffer-gb");
 const runGpuUtilInput = document.getElementById("run-gpu-utilization");
 const runCpuUtilInput = document.getElementById("run-cpu-utilization");
+const runCpuKvCacheInput = document.getElementById("run-cpu-kv-cache");
 
 const statContainers = document.getElementById("stat-containers");
 const statRunning = document.getElementById("stat-running");
@@ -399,7 +402,13 @@ function setRunEstimateState(state, statusText, options = {}) {
   if (state === "warn") runEstimateCard.classList.add("state-warn");
   if (state === "error") runEstimateCard.classList.add("state-error");
 
-  const icons = { ok: "✅", warn: "⚠️", error: "❌", loading: "⏳", idle: "⚡" };
+  const icons = {
+    ok: "✅",
+    warn: "⚠️",
+    error: "❌",
+    loading: "⏳",
+    idle: "⚡",
+  };
   if (icon) icon.textContent = icons[state] || icons.idle;
   if (status) status.textContent = statusText;
 
@@ -464,9 +473,14 @@ function setRunEstimateState(state, statusText, options = {}) {
     setMetric("em-available", m.availableGb ?? "—");
     setMetric("em-maxseqs", m.maxSeqs ?? "—");
   } else {
-    ["em-weights", "em-kv", "em-overhead", "em-total", "em-available", "em-maxseqs"].forEach(
-      (id) => setMetric(id, "—"),
-    );
+    [
+      "em-weights",
+      "em-kv",
+      "em-overhead",
+      "em-total",
+      "em-available",
+      "em-maxseqs",
+    ].forEach((id) => setMetric(id, "—"));
   }
 
   // Confidence
@@ -475,7 +489,11 @@ function setRunEstimateState(state, statusText, options = {}) {
   const footerMeta = document.getElementById("estimate-footer-meta");
 
   if (confDot) {
-    confDot.classList.remove("confidence-high", "confidence-medium", "confidence-low");
+    confDot.classList.remove(
+      "confidence-high",
+      "confidence-medium",
+      "confidence-low",
+    );
     if (options.confidence) {
       confDot.classList.add(`confidence-${options.confidence}`);
     }
@@ -486,14 +504,21 @@ function setRunEstimateState(state, statusText, options = {}) {
 
 function renderRunEstimate(result) {
   if (!result || result.ok !== true) {
-    setRunEstimateState("error", result?.message || "Unable to compute estimate.");
+    setRunEstimateState(
+      "error",
+      result?.message || "Unable to compute estimate.",
+    );
     return;
   }
 
   if (result.manual_mode === true) {
-    setRunEstimateState("warn", result.message || "Manual utilization mode enabled.", {
-      footerText: `device=${result.device || "gpu"} | gpu_util=${result.gpu_utilization ?? "auto"} | estimation=disabled`,
-    });
+    setRunEstimateState(
+      "warn",
+      result.message || "Manual utilization mode enabled.",
+      {
+        footerText: `device=${result.device || "gpu"} | gpu_util=${result.gpu_utilization ?? "auto"} | estimation=disabled`,
+      },
+    );
     return;
   }
 
@@ -514,7 +539,8 @@ function renderRunEstimate(result) {
   const estimatedMaxSeqs = result.estimated_max_num_seqs;
   const requestedMaxSeqs = Number(result.requested_max_num_seqs || 0);
   const fitsRequested =
-    typeof estimatedMaxSeqs !== "number" || requestedMaxSeqs <= estimatedMaxSeqs;
+    typeof estimatedMaxSeqs !== "number" ||
+    requestedMaxSeqs <= estimatedMaxSeqs;
 
   const fits = result.fits_current_settings && fitsRequested;
   const state = fits ? "ok" : "warn";
@@ -526,7 +552,10 @@ function renderRunEstimate(result) {
   const denom = totalVramGb > 0 ? totalVramGb : totalEstGb || 1;
   const weightsPct = Math.min(100, (weightsGb / denom) * 100);
   const kvPct = Math.min(100 - weightsPct, (kvGb / denom) * 100);
-  const overheadPct = Math.min(100 - weightsPct - kvPct, (overheadGb / denom) * 100);
+  const overheadPct = Math.min(
+    100 - weightsPct - kvPct,
+    (overheadGb / denom) * 100,
+  );
   const usedPct = weightsPct + kvPct + overheadPct;
   const freePct = Math.max(0, 100 - usedPct);
   const freeGb = Math.max(0, denom - totalEstGb).toFixed(2);
@@ -540,7 +569,10 @@ function renderRunEstimate(result) {
     config_architecture: "Architecture heuristic (12×L×H²)",
     disk_size_fallback: "Disk size fallback estimate",
   };
-  const sourceLabel = sourceLabels[breakdown.estimation_source] || breakdown.estimation_source || "—";
+  const sourceLabel =
+    sourceLabels[breakdown.estimation_source] ||
+    breakdown.estimation_source ||
+    "—";
 
   setRunEstimateState(state, statusText, {
     breakdown: true,
@@ -575,7 +607,8 @@ async function refreshRunEstimate() {
   const payload = getFormPayload(runForm);
   if (!payload.model_id || String(payload.model_id).trim() === "") {
     setRunEstimateState("warn", "Model ID required", {
-      footerText: "Enter a model id to compute analytical capacity and VRAM estimate.",
+      footerText:
+        "Enter a model id to compute analytical capacity and VRAM estimate.",
     });
     return;
   }
@@ -584,7 +617,9 @@ async function refreshRunEstimate() {
     String(payload.device || "gpu").toLowerCase() === "cpu"
       ? "CPU mode selected: checking runtime settings without VRAM constraints."
       : "Evaluating weights, KV cache, and runtime overhead on selected GPU.";
-  setRunEstimateState("loading", "Computing estimate…", { footerText: loadingMsg });
+  setRunEstimateState("loading", "Computing estimate…", {
+    footerText: loadingMsg,
+  });
 
   try {
     const result = await api("/api/run/estimate", {
@@ -809,6 +844,9 @@ function syncRunDeviceFields() {
   if (runCpuUtilField) {
     runCpuUtilField.classList.toggle("is-disabled", !isCpu);
   }
+  if (runCpuKvCacheField) {
+    runCpuKvCacheField.classList.toggle("is-disabled", !isCpu);
+  }
   if (runGpuInput) {
     runGpuInput.disabled = isCpu;
   }
@@ -825,6 +863,12 @@ function syncRunDeviceFields() {
     runCpuUtilInput.disabled = !isCpu;
     if (!isCpu) {
       runCpuUtilInput.value = "";
+    }
+  }
+  if (runCpuKvCacheInput) {
+    runCpuKvCacheInput.disabled = !isCpu;
+    if (!isCpu) {
+      runCpuKvCacheInput.value = "";
     }
   }
 }
@@ -1134,17 +1178,29 @@ function renderContainers(items) {
 
   items.forEach((container) => {
     const instanceId = getInstanceId(container);
+    const backendValue = String(
+      container.compute_backend || "gpu",
+    ).toUpperCase();
+    let backendLabel = backendValue;
+    if (backendValue === "CPU") {
+      const details = [];
+      if (typeof container.cpu_utilization === "number") {
+        details.push(`cpu=${container.cpu_utilization.toFixed(3)}`);
+      }
+      const kvSpace = String(container.cpu_kv_cache_space || "").trim();
+      if (kvSpace !== "") {
+        details.push(`kv=${kvSpace}GiB`);
+      }
+      if (details.length > 0) {
+        backendLabel = `${backendValue} (${details.join(", ")})`;
+      }
+    }
     const tr = document.createElement("tr");
     tr.appendChild(makeCell("Name", container.name));
     tr.appendChild(makeCell("Model", `${container.model_id} #${instanceId}`));
     tr.appendChild(makeStatusCell("Status", container.status));
     tr.appendChild(makeCell("Port", String(container.host_port ?? "-")));
-    tr.appendChild(
-      makeCell(
-        "Backend",
-        String(container.compute_backend || "gpu").toUpperCase(),
-      ),
-    );
+    tr.appendChild(makeCell("Backend", backendLabel));
     tr.appendChild(makeCell("GPU", String(container.gpu_index ?? "-")));
 
     const actionsTd = document.createElement("td");
@@ -1394,6 +1450,7 @@ async function refreshAll(options = {}) {
 runForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
+    syncRunDeviceFields();
     const payload = getFormPayload(runForm);
     notify(`Launching ${payload.model_id}...`, "info", "Launch started");
     setStatus(`Launching ${payload.model_id}...`, "ok");
@@ -1423,9 +1480,13 @@ runForm.addEventListener("change", () => {
   scheduleRunEstimate();
 });
 
+runForm.addEventListener("change", () => {
+  syncRunDeviceFields();
+  scheduleRunEstimate();
+});
+
 inferForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  inferOutput.textContent = "Running inference...";
   try {
     const payload = getFormPayload(inferForm);
     const selectedOption = inferTarget?.selectedOptions?.[0];
@@ -1439,17 +1500,115 @@ inferForm.addEventListener("submit", async (event) => {
 
     payload.model_id = selectedOption.dataset.modelId;
     payload.base_url = selectedOption.dataset.baseUrl;
+
+    inferOutput.textContent = "";
+    inferMetrics.textContent = "Streaming response...";
     notify(
       `Running inference on ${payload.model_id}...`,
       "info",
       "Inference started",
     );
     setStatus(`Running inference on ${payload.model_id}...`, "ok");
-    const data = await api("/api/infer", {
+
+    const response = await fetch("/api/infer/stream", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    inferOutput.textContent = data.response || data.answer || "";
+
+    if (!response.ok || !response.body) {
+      let details = "Streaming endpoint unavailable.";
+      try {
+        const payloadError = await response.json();
+        details = payloadError?.detail || details;
+      } catch {
+        // Keep fallback details.
+      }
+      throw new Error(details);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let usage = null;
+    let elapsedSeconds = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() || "";
+
+      for (const frame of frames) {
+        const lines = frame
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.startsWith("data:"));
+
+        for (const line of lines) {
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+
+          let eventPayload = null;
+          try {
+            eventPayload = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+
+          if (eventPayload.type === "token") {
+            inferOutput.textContent += String(eventPayload.text || "");
+            continue;
+          }
+
+          if (eventPayload.type === "usage") {
+            usage = eventPayload;
+            continue;
+          }
+
+          if (eventPayload.type === "done") {
+            const elapsed = Number(eventPayload.elapsed_seconds);
+            if (!Number.isNaN(elapsed) && elapsed > 0) {
+              elapsedSeconds = elapsed;
+            }
+            continue;
+          }
+
+          if (eventPayload.type === "error") {
+            throw new Error(
+              String(eventPayload.message || "Streaming inference failed."),
+            );
+          }
+        }
+      }
+    }
+
+    const completionTokens = Number(usage?.completion_tokens);
+    const promptTokens = Number(usage?.prompt_tokens);
+    const totalTokens = Number(usage?.total_tokens);
+    const hasTokenUsage =
+      !Number.isNaN(completionTokens) &&
+      !Number.isNaN(promptTokens) &&
+      !Number.isNaN(totalTokens);
+    const hasElapsed = typeof elapsedSeconds === "number" && elapsedSeconds > 0;
+    const tokensPerSecond =
+      hasTokenUsage && hasElapsed ? completionTokens / elapsedSeconds : null;
+
+    if (hasTokenUsage && hasElapsed && typeof tokensPerSecond === "number") {
+      inferMetrics.textContent = `prompt=${promptTokens} • completion=${completionTokens} • total=${totalTokens} • speed=${tokensPerSecond.toFixed(2)} tok/s • elapsed=${elapsedSeconds.toFixed(2)}s`;
+    } else if (hasTokenUsage) {
+      inferMetrics.textContent = `prompt=${promptTokens} • completion=${completionTokens} • total=${totalTokens} • speed=n/a`;
+    } else {
+      inferMetrics.textContent =
+        "Token metrics unavailable for this runtime/image.";
+    }
+
+    if (!inferOutput.textContent.trim()) {
+      inferOutput.textContent = "(Empty response)";
+    }
+
     notify(
       `Inference completed for ${payload.model_id}.`,
       "success",
@@ -1458,6 +1617,7 @@ inferForm.addEventListener("submit", async (event) => {
     setStatus(`Inference completed for ${payload.model_id}.`, "ok");
   } catch (error) {
     inferOutput.textContent = "Inference failed.";
+    inferMetrics.textContent = "No metrics available.";
     notify(
       `Inference failed: ${error.message}`,
       "error",
