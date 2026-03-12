@@ -392,7 +392,9 @@ function formatEstimateRatio(value) {
 }
 
 function setRunLaunchBlocked(blocked, reason = "") {
-  runLaunchBlockedReason = blocked ? String(reason || "Launch is blocked.") : "";
+  runLaunchBlockedReason = blocked
+    ? String(reason || "Launch is blocked.")
+    : "";
 
   if (runSubmitButton) {
     runSubmitButton.disabled = blocked;
@@ -1041,7 +1043,10 @@ async function copyLogsToClipboard() {
     setStatus("Logs copied to clipboard.", "ok");
   } catch (error) {
     notify("Unable to copy logs to clipboard.", "error", "Copy logs", 6500);
-    setStatus(`Unable to copy logs: ${error.message || "unknown error"}`, "error");
+    setStatus(
+      `Unable to copy logs: ${error.message || "unknown error"}`,
+      "error",
+    );
   }
 }
 
