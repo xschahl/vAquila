@@ -66,6 +66,36 @@ def _extract_text_from_stream_choice(choice: object) -> str:
     return ""
 
 
+def _build_message_content(
+    prompt: str,
+    images: list[str] | None = None,
+) -> str | list[dict[str, object]]:
+    """Build message content supporting both text and images.
+    
+    Args:
+        prompt: User text prompt
+        images: Optional list of base64-encoded image URLs (data:image/...)
+        
+    Returns:
+        Either a string (text only) or a list of content blocks (text + images)
+    """
+    if not images:
+        return prompt
+    
+    content_list: list[dict[str, object]] = [
+        {"type": "text", "text": prompt}
+    ]
+    
+    for image_url in images:
+        if image_url and isinstance(image_url, str):
+            content_list.append({
+                "type": "image_url",
+                "image_url": {"url": image_url}
+            })
+    
+    return content_list if len(content_list) > 1 else prompt
+
+
 def stream_inference(
     base_url: str,
     model_id: str,
@@ -73,6 +103,7 @@ def stream_inference(
     max_tokens: int,
     temperature: float,
     timeout_seconds: int,
+    images: list[str] | None = None,
 ) -> Iterator[dict[str, object]]:
     """Stream inference events from vLLM as token and usage payloads."""
     if max_tokens <= 0:
@@ -80,9 +111,10 @@ def stream_inference(
     if timeout_seconds <= 0:
         raise VaquilaError("timeout must be greater than 0.")
 
+    message_content = _build_message_content(prompt, images)
     payload = {
         "model": model_id,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": message_content}],
         "max_tokens": max_tokens,
         "temperature": temperature,
         "chat_template_kwargs": {"enable_thinking": False},
@@ -236,6 +268,7 @@ def run_inference(
     max_tokens: int,
     temperature: float,
     timeout_seconds: int,
+    images: list[str] | None = None,
 ) -> str:
     """Run a chat completion request and return the assistant response."""
     if max_tokens <= 0:
@@ -243,9 +276,10 @@ def run_inference(
     if timeout_seconds <= 0:
         raise VaquilaError("timeout must be greater than 0.")
 
+    message_content = _build_message_content(prompt, images)
     payload = {
         "model": model_id,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": message_content}],
         "max_tokens": max_tokens,
         "temperature": temperature,
         "chat_template_kwargs": {"enable_thinking": False},

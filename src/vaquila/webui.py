@@ -86,6 +86,7 @@ class RunRequest(BaseModel):
     reasoning_parser: str = ""
     enable_thinking: bool = True
     allow_long_context_override: bool = False
+    trust_remote_code: bool = False
     quantization: str = "auto"
     kv_cache_dtype: str = "auto"
 
@@ -113,6 +114,7 @@ class InferRequest(BaseModel):
     max_tokens: int = Field(default=128, ge=1)
     temperature: float = Field(default=0.2)
     timeout: int = Field(default=120, ge=1)
+    images: list[str] = Field(default_factory=list, description="Base64-encoded image URLs (data:image/...)")
 
 
 def _utc_now() -> str:
@@ -496,6 +498,7 @@ def create_web_app() -> FastAPI:
                             reasoning_parser=_normalize_optional_text(payload.reasoning_parser),
                             enable_thinking=payload.enable_thinking,
                             allow_long_context_override=payload.allow_long_context_override,
+                            trust_remote_code=payload.trust_remote_code,
                             quantization=payload.quantization,
                             kv_cache_dtype=payload.kv_cache_dtype,
                             device=payload.device,
@@ -1132,6 +1135,7 @@ def create_web_app() -> FastAPI:
                 max_tokens=payload.max_tokens,
                 temperature=payload.temperature,
                 timeout_seconds=payload.timeout,
+                images=payload.images if payload.images else None,
             )
             return {"answer": answer, "response": answer}
         except VaquilaError as exc:
@@ -1154,6 +1158,7 @@ def create_web_app() -> FastAPI:
                     max_tokens=payload.max_tokens,
                     temperature=payload.temperature,
                     timeout_seconds=payload.timeout,
+                    images=payload.images if payload.images else None,
                 ):
                     if isinstance(event, dict) and event.get("type") == "done":
                         elapsed_seconds = max(0.0, perf_counter() - started_at)

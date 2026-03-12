@@ -358,6 +358,13 @@
                   <option value="true">true</option>
                 </select>
               </div>
+              <div class="field">
+                <label for="run-trust-remote-code">Trust remote code</label
+                ><select id="run-trust-remote-code" name="trust_remote_code">
+                  <option value="false" selected>false</option>
+                  <option value="true">true</option>
+                </select>
+              </div>
               <div class="form-actions span-2">
                 <button type="submit">Launch model</button>
                 <span class="hint"
@@ -538,8 +545,40 @@
                   placeholder="Explain the current model status..."
                 ></textarea>
               </div>
-              <div class="form-actions span-2">
-                <button type="submit">Run inference</button>
+              <div class="field span-2">
+                <label for="infer-images">Images (optional)</label
+                ><input
+                  id="infer-images"
+                  name="images"
+                  type="file"
+                  multiple
+                  accept="image/*"
+                />
+                <span class="field-help"
+                  >Upload one or more images to include in your prompt. Images
+                  are converted to base64 for multi-modal models.</span
+                >
+              </div>
+              <div
+                id="infer-images-preview"
+                class="field span-2 infer-images-preview"
+                hidden
+              >
+                <div class="field-help">Selected images:</div>
+                <div id="infer-images-list" class="infer-images-list"></div>
+              </div>
+              <div class="form-actions infer-actions span-2">
+                <button type="submit" id="infer-submit-button">
+                  Run inference
+                </button>
+                <button
+                  type="button"
+                  id="infer-stop-button"
+                  class="danger-button"
+                  disabled
+                >
+                  Stop inference
+                </button>
               </div>
             </form>
             <div class="response-block">

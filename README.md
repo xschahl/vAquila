@@ -35,6 +35,7 @@ For the most up-to-date guide on how vAquila works and how to run it, please ref
 
 - **Auto-VRAM**: Automatic calculation of the `--gpu-memory-utilization` flag via NVML to prevent crashes.
 - **One-Click Deployment**: Download and run models via a simple `vaq run <hf-model>` command.
+- **Advanced Model Compatibility**: Optional `trust_remote_code` support for repositories that require custom model code.
 - **Docker Orchestration**: Invisible management of containers, exposed ports, and Hugging Face cache.
 - **Web UI**: A local dashboard to manage models, containers, cache, and inference workflows.
 

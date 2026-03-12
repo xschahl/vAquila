@@ -20,6 +20,7 @@ title: CLI Reference
 - `--max-model-len`
 - `--quantization`
 - `--kv-cache-dtype`
+- `--trust-remote-code`
 
 Manual overrides:
 

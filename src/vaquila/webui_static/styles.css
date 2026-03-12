@@ -1015,6 +1015,39 @@ button:hover,
   resize: vertical;
 }
 
+.field input[type="file"] {
+  padding: 7px 8px;
+  cursor: pointer;
+}
+
+.field input[type="file"]::file-selector-button {
+  margin-right: 10px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 10px;
+  color: #f4f8ff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(125deg, #3d77c5, #4f8bdb);
+  box-shadow: 0 8px 18px rgba(61, 119, 197, 0.2);
+  transition:
+    transform 140ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.field input[type="file"]:hover::file-selector-button {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+.field input[type="file"]:focus::file-selector-button {
+  box-shadow:
+    0 0 0 3px rgba(82, 215, 255, 0.14),
+    0 8px 18px rgba(61, 119, 197, 0.2);
+}
+
 .field.is-disabled {
   opacity: 0.58;
 }
@@ -1031,6 +1064,59 @@ button:hover,
 .form-actions {
   margin-top: 2px;
   flex-wrap: wrap;
+}
+
+.infer-actions {
+  justify-content: flex-start;
+}
+
+.infer-actions button {
+  min-width: 148px;
+}
+
+.infer-images-preview[hidden] {
+  display: none;
+}
+
+.infer-images-list {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.infer-image-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 88px;
+  height: 88px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+}
+
+.infer-image-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.infer-image-chip-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(16, 18, 25, 0.72);
+  backdrop-filter: blur(8px);
 }
 
 /* --- Run estimate card --- */
@@ -1658,6 +1744,10 @@ body[data-theme="light"] .field select,
 body[data-theme="light"] .field textarea {
   border-color: rgba(104, 124, 150, 0.3);
   background: rgba(255, 255, 255, 0.88);
+}
+
+body[data-theme="light"] .field input[type="file"]::file-selector-button {
+  box-shadow: 0 8px 18px rgba(47, 111, 189, 0.16);
 }
 
 body[data-theme="light"] .field input:focus,

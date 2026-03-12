@@ -70,6 +70,7 @@ When one of these manual overrides is set, automatic estimation and optimization
 - `--reasoning-parser`: vLLM reasoning parser.
 - `--enable-thinking` or `--disable-thinking`: enables or disables thinking mode.
 - `--allow-long-context-override` or `--no-allow-long-context-override`: allows a context length above the model limit when supported, which is a risky advanced override.
+- `--trust-remote-code` or `--no-trust-remote-code`: allows model-specific custom code from the Hugging Face repository. Keep this disabled unless you trust the model source.
 
 ## How to choose values
 

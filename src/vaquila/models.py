@@ -37,4 +37,5 @@ class ManagedContainer:
     enable_thinking: bool | None
     required_ratio: float | None
     allow_long_context_override: bool | None
+    trust_remote_code: bool | None
     instance_id: str | None = None
