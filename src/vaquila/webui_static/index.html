@@ -37,17 +37,14 @@
             <span class="eyebrow">Local AI operations</span>
             <h1>vAquila Control Center</h1>
             <p>
-              Operate your local vLLM runtime with confidence: launch models,
-              monitor VRAM, inspect logs, and validate inference from one
-              reliable control surface.
+              Launch models, monitor resources, inspect logs, and run inference
+              from one simple local console.
             </p>
             <div class="hero-actions">
               <span class="auto-refresh-pill"
                 >Auto-refresh every 6 seconds</span
               >
-              <span class="hint"
-                >FastAPI local UI for Docker + vLLM workflows</span
-              >
+              <span class="hint">Local FastAPI UI</span>
             </div>
           </div>
         </div>
@@ -70,615 +67,705 @@
         </div>
       </header>
 
-      <section class="stats-grid">
-        <article class="metric-card accent-blue">
-          <span class="metric-label">Managed containers</span>
-          <strong class="metric-value" id="stat-containers">0</strong>
-          <span class="metric-foot">All vAquila containers</span>
-        </article>
-        <article class="metric-card accent-green">
-          <span class="metric-label">Running now</span>
-          <strong class="metric-value" id="stat-running">0</strong>
-          <span class="metric-foot">Currently serving requests</span>
-        </article>
-        <article class="metric-card accent-purple">
-          <span class="metric-label">Cached models</span>
-          <strong class="metric-value" id="stat-cache">0</strong>
-          <span class="metric-foot">Ready from local HF cache</span>
-        </article>
-        <article class="metric-card accent-gold">
-          <span class="metric-label">Run tasks</span>
-          <strong class="metric-value" id="stat-tasks">0</strong>
-          <span class="metric-foot">Background launch tracking</span>
-        </article>
-      </section>
+      <nav class="app-tabs" role="tablist" aria-label="Control center sections">
+        <button
+          type="button"
+          class="app-tab is-active"
+          role="tab"
+          aria-selected="true"
+          aria-controls="tab-overview"
+          data-tab-target="overview"
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          class="app-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="tab-run"
+          data-tab-target="run"
+        >
+          Run
+        </button>
+        <button
+          type="button"
+          class="app-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="tab-inference"
+          data-tab-target="inference"
+        >
+          Inference
+        </button>
+        <button
+          type="button"
+          class="app-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="tab-tasks"
+          data-tab-target="tasks"
+        >
+          Tasks
+        </button>
+        <button
+          type="button"
+          class="app-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="tab-containers"
+          data-tab-target="containers"
+        >
+          Containers
+        </button>
+        <button
+          type="button"
+          class="app-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="tab-cache"
+          data-tab-target="cache"
+        >
+          Cache
+        </button>
+      </nav>
 
-      <section class="panel gpu-panel">
-        <div class="panel-head">
-          <div>
-            <span class="eyebrow">Capacity overview</span>
-            <h2>GPU utilization</h2>
-          </div>
-          <span class="panel-meta" id="gpu-summary"
-            >Detecting GPU status...</span
-          >
-        </div>
-        <div class="gpu-grid" id="gpu-grid"></div>
-        <div class="usage-legend" aria-label="GPU legend">
-          <span class="usage-legend-item">
-            <span class="legend-swatch legend-swatch-system"></span>
-            Brown segment: system or unmanaged VRAM usage
-          </span>
-        </div>
-      </section>
+      <section
+        class="tab-panel is-active"
+        id="tab-overview"
+        role="tabpanel"
+        aria-label="Overview"
+        data-tab-panel="overview"
+      >
+        <section class="stats-grid">
+          <article class="metric-card accent-blue">
+            <span class="metric-label">Managed containers</span>
+            <strong class="metric-value" id="stat-containers">0</strong>
+            <span class="metric-foot">All vAquila containers</span>
+          </article>
+          <article class="metric-card accent-green">
+            <span class="metric-label">Running now</span>
+            <strong class="metric-value" id="stat-running">0</strong>
+            <span class="metric-foot">Currently serving requests</span>
+          </article>
+          <article class="metric-card accent-purple">
+            <span class="metric-label">Cached models</span>
+            <strong class="metric-value" id="stat-cache">0</strong>
+            <span class="metric-foot">Ready from local HF cache</span>
+          </article>
+          <article class="metric-card accent-gold">
+            <span class="metric-label">Run tasks</span>
+            <strong class="metric-value" id="stat-tasks">0</strong>
+            <span class="metric-foot">Background launch tracking</span>
+          </article>
+        </section>
 
-      <section class="panel system-panel" id="system-usage-card">
-        <div class="panel-head">
-          <div class="system-usage-head">
+        <section class="panel gpu-panel">
+          <div class="panel-head">
             <div>
-              <span class="eyebrow">Host metrics</span>
-              <h2>CPU and RAM utilization</h2>
+              <span class="eyebrow">Capacity overview</span>
+              <h2>GPU utilization</h2>
             </div>
-            <span class="panel-meta" id="system-summary"
-              >Detecting CPU and RAM usage...</span
+            <span class="panel-meta" id="gpu-summary"
+              >Detecting GPU status...</span
             >
           </div>
-        </div>
-        <div class="system-usage">
-          <div class="system-usage-grid">
-            <div class="system-usage-item">
-              <div class="system-usage-label-row">
-                <span>CPU usage</span>
-                <span id="cpu-usage-value">-</span>
-              </div>
-              <div class="progress-track">
-                <span
-                  class="system-usage-bar cpu"
-                  id="cpu-usage-bar"
-                  style="width: 0%"
-                ></span>
-              </div>
-            </div>
-            <div class="system-usage-item">
-              <div class="system-usage-label-row">
-                <span>RAM usage</span>
-                <span id="ram-usage-value">-</span>
-              </div>
-              <div class="progress-track">
-                <span
-                  class="system-usage-bar ram"
-                  id="ram-usage-bar"
-                  style="width: 0%"
-                ></span>
-              </div>
-            </div>
-          </div>
-          <div class="system-model-breakdown">
-            <div class="system-model-title">CPU backend model breakdown</div>
-            <div class="system-model-track-block">
-              <div class="system-model-track-label">Model CPU share (host)</div>
-              <div
-                class="progress-track system-model-stack"
-                id="cpu-model-cpu-stack"
-              ></div>
-            </div>
-            <div class="system-model-track-block">
-              <div class="system-model-track-label">Model RAM share (host)</div>
-              <div
-                class="progress-track system-model-stack"
-                id="cpu-model-ram-stack"
-              ></div>
-            </div>
-            <div class="system-model-list" id="cpu-model-list">
-              <div class="empty-state">No CPU-backed model running.</div>
-            </div>
-          </div>
-          <div class="usage-legend" aria-label="CPU and RAM legend">
+          <div class="gpu-grid" id="gpu-grid"></div>
+          <div class="usage-legend" aria-label="GPU legend">
             <span class="usage-legend-item">
               <span class="legend-swatch legend-swatch-system"></span>
-              Brown segment: other host usage (outside listed CPU models)
+              Brown segment: system or unmanaged VRAM usage
             </span>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <div class="workspace-grid">
-        <div class="column-stack">
-          <section class="panel panel-form">
-            <div class="panel-head compact">
+        <section class="panel system-panel" id="system-usage-card">
+          <div class="panel-head">
+            <div class="system-usage-head">
               <div>
-                <span class="eyebrow">Deployment</span>
-                <h2>Run model</h2>
+                <span class="eyebrow">Host metrics</span>
+                <h2>CPU and RAM utilization</h2>
               </div>
-              <span class="panel-meta"
-                >Launch a vLLM container with explicit runtime knobs.</span
+              <span class="panel-meta" id="system-summary"
+                >Detecting CPU and RAM usage...</span
               >
             </div>
-            <form id="run-form" class="form-grid">
-              <div class="field span-2">
-                <label for="run-model-id">Model ID</label>
-                <input
-                  id="run-model-id"
-                  name="model_id"
-                  required
-                  placeholder="Qwen/Qwen3-0.6B"
-                />
-              </div>
-              <div class="field">
-                <label for="run-port">Port</label
-                ><input
-                  id="run-port"
-                  name="port"
-                  type="number"
-                  value="8000"
-                  min="1"
-                  max="65535"
-                />
-              </div>
-              <div class="field">
-                <label for="run-device">Device</label
-                ><select id="run-device" name="device">
-                  <option value="gpu" selected>gpu</option>
-                  <option value="cpu">cpu</option>
-                </select>
-              </div>
-              <div class="field" id="run-gpu-field">
-                <label for="run-gpu-index">GPU index</label
-                ><input
-                  id="run-gpu-index"
-                  name="gpu_index"
-                  type="number"
-                  value="0"
-                  min="0"
-                />
-              </div>
-              <div class="field" id="run-buffer-field">
-                <label for="run-buffer-gb">Buffer (GiB)</label
-                ><input
-                  id="run-buffer-gb"
-                  name="buffer_gb"
-                  type="number"
-                  step="0.1"
-                  placeholder="Optional"
-                />
-              </div>
-              <div class="field" id="run-gpu-utilization-field">
-                <label for="run-gpu-utilization"
-                  >GPU utilization ratio (manual)</label
-                ><input
-                  id="run-gpu-utilization"
-                  name="gpu_utilization"
-                  type="number"
-                  min="0.01"
-                  max="1"
-                  step="0.01"
-                  placeholder="Optional (0..1)"
-                />
-              </div>
-              <div class="field" id="run-cpu-utilization-field">
-                <label for="run-cpu-utilization"
-                  >CPU utilization ratio (manual)</label
-                ><input
-                  id="run-cpu-utilization"
-                  name="cpu_utilization"
-                  type="number"
-                  min="0.01"
-                  max="1"
-                  step="0.01"
-                  placeholder="Optional (0..1)"
-                />
-              </div>
-              <div class="field" id="run-cpu-kv-cache-field">
-                <label for="run-cpu-kv-cache">CPU KV cache cap (GiB)</label
-                ><input
-                  id="run-cpu-kv-cache"
-                  name="cpu_kv_cache_space"
-                  type="number"
-                  min="1"
-                  step="1"
-                  placeholder="Optional (e.g. 4)"
-                />
-              </div>
-              <div class="field">
-                <label for="run-startup-timeout">Startup timeout (s)</label
-                ><input
-                  id="run-startup-timeout"
-                  name="startup_timeout"
-                  type="number"
-                  value="900"
-                  min="10"
-                />
-              </div>
-              <div class="field">
-                <label for="run-max-num-seqs">Max num seqs</label
-                ><input
-                  id="run-max-num-seqs"
-                  name="max_num_seqs"
-                  type="number"
-                  value="1"
-                  min="1"
-                />
-              </div>
-              <div class="field">
-                <label for="run-max-model-len">Max model len</label
-                ><input
-                  id="run-max-model-len"
-                  name="max_model_len"
-                  type="number"
-                  value="16384"
-                  min="1"
-                />
-              </div>
-              <div class="field">
-                <label for="run-quantization">Quantization</label
-                ><input
-                  id="run-quantization"
-                  name="quantization"
-                  value="auto"
-                />
-              </div>
-              <div class="field">
-                <label for="run-kv-dtype">KV cache dtype</label
-                ><select id="run-kv-dtype" name="kv_cache_dtype">
-                  <option value="auto" selected>auto</option>
-                  <option value="bfloat16">bfloat16</option>
-                  <option value="fp8">fp8</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="run-tool-parser">Tool call parser</label
-                ><input
-                  id="run-tool-parser"
-                  name="tool_call_parser"
-                  placeholder="Optional"
-                />
-              </div>
-              <div class="field">
-                <label for="run-reasoning-parser">Reasoning parser</label
-                ><input
-                  id="run-reasoning-parser"
-                  name="reasoning_parser"
-                  placeholder="Optional"
-                />
-              </div>
-              <div class="field">
-                <label for="run-thinking">Enable thinking</label
-                ><select id="run-thinking" name="enable_thinking">
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="run-long-context">Allow long context override</label
-                ><select
-                  id="run-long-context"
-                  name="allow_long_context_override"
-                >
-                  <option value="false">false</option>
-                  <option value="true">true</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="run-trust-remote-code">Trust remote code</label
-                ><select id="run-trust-remote-code" name="trust_remote_code">
-                  <option value="false" selected>false</option>
-                  <option value="true">true</option>
-                </select>
-              </div>
-              <div class="form-actions span-2">
-                <button type="submit">Launch model</button>
-                <span class="hint"
-                  >Tasks appear on the right and logs can be opened as a full
-                  console.</span
-                >
-              </div>
-              <div class="run-estimate span-2" id="run-estimate-card">
-                <div class="run-estimate-header">
-                  <span class="run-estimate-icon" id="run-estimate-icon"
-                    >⚡</span
-                  >
-                  <span class="run-estimate-status" id="run-estimate-status">
-                    Fill the run fields to compute an analytical VRAM estimate.
-                  </span>
+          </div>
+          <div class="system-usage">
+            <div class="system-usage-grid">
+              <div class="system-usage-item">
+                <div class="system-usage-label-row">
+                  <span>CPU usage</span>
+                  <span id="cpu-usage-value">-</span>
                 </div>
-                <div class="estimate-bar-wrap" id="estimate-bar-wrap">
-                  <div class="estimate-bar-track" id="estimate-bar-track">
-                    <span
-                      class="estimate-segment estimate-seg-weights"
-                      id="estimate-seg-weights"
-                      data-tooltip="Model weights"
-                    ></span>
-                    <span
-                      class="estimate-segment estimate-seg-kv"
-                      id="estimate-seg-kv"
-                      data-tooltip="KV cache"
-                    ></span>
-                    <span
-                      class="estimate-segment estimate-seg-overhead"
-                      id="estimate-seg-overhead"
-                      data-tooltip="Runtime overhead"
-                    ></span>
-                    <span
-                      class="estimate-segment estimate-seg-free"
-                      id="estimate-seg-free"
-                      data-tooltip="Free VRAM"
-                    ></span>
-                  </div>
-                  <div class="estimate-bar-legend">
-                    <span class="estimate-legend-item"
-                      ><span class="estimate-legend-dot seg-weights"></span
-                      >Weights</span
-                    >
-                    <span class="estimate-legend-item"
-                      ><span class="estimate-legend-dot seg-kv"></span>KV
-                      cache</span
-                    >
-                    <span class="estimate-legend-item"
-                      ><span class="estimate-legend-dot seg-overhead"></span
-                      >Overhead</span
-                    >
-                    <span class="estimate-legend-item"
-                      ><span class="estimate-legend-dot seg-free"></span
-                      >Free</span
-                    >
-                  </div>
-                </div>
-                <div class="estimate-metrics-grid" id="estimate-metrics-grid">
-                  <div class="estimate-metric-card">
-                    <span class="estimate-metric-label">Weights</span>
-                    <strong class="estimate-metric-value" id="em-weights"
-                      >—</strong
-                    >
-                    <span class="estimate-metric-unit">GiB</span>
-                  </div>
-                  <div class="estimate-metric-card">
-                    <span class="estimate-metric-label">KV cache</span>
-                    <strong class="estimate-metric-value" id="em-kv">—</strong>
-                    <span class="estimate-metric-unit">GiB</span>
-                  </div>
-                  <div class="estimate-metric-card">
-                    <span class="estimate-metric-label">Overhead</span>
-                    <strong class="estimate-metric-value" id="em-overhead"
-                      >—</strong
-                    >
-                    <span class="estimate-metric-unit">GiB</span>
-                  </div>
-                  <div class="estimate-metric-card">
-                    <span class="estimate-metric-label">Total est.</span>
-                    <strong class="estimate-metric-value" id="em-total"
-                      >—</strong
-                    >
-                    <span class="estimate-metric-unit">GiB</span>
-                  </div>
-                  <div class="estimate-metric-card">
-                    <span class="estimate-metric-label">Available</span>
-                    <strong class="estimate-metric-value" id="em-available"
-                      >—</strong
-                    >
-                    <span class="estimate-metric-unit">GiB</span>
-                  </div>
-                  <div class="estimate-metric-card">
-                    <span class="estimate-metric-label">Max seqs</span>
-                    <strong class="estimate-metric-value" id="em-maxseqs"
-                      >—</strong
-                    >
-                    <span class="estimate-metric-unit">estimated</span>
-                  </div>
-                </div>
-                <div class="estimate-footer" id="estimate-footer">
-                  <span class="estimate-confidence" id="estimate-confidence">
-                    <span
-                      class="estimate-confidence-dot"
-                      id="estimate-confidence-dot"
-                    ></span>
-                    <span id="estimate-confidence-label"
-                      >Waiting for input…</span
-                    >
-                  </span>
+                <div class="progress-track">
                   <span
-                    class="estimate-footer-meta"
-                    id="estimate-footer-meta"
+                    class="system-usage-bar cpu"
+                    id="cpu-usage-bar"
+                    style="width: 0%"
                   ></span>
                 </div>
               </div>
-            </form>
-          </section>
+              <div class="system-usage-item">
+                <div class="system-usage-label-row">
+                  <span>RAM usage</span>
+                  <span id="ram-usage-value">-</span>
+                </div>
+                <div class="progress-track">
+                  <span
+                    class="system-usage-bar ram"
+                    id="ram-usage-bar"
+                    style="width: 0%"
+                  ></span>
+                </div>
+              </div>
+            </div>
+            <div class="system-model-breakdown">
+              <div class="system-model-title">CPU backend model breakdown</div>
+              <div class="system-model-track-block">
+                <div class="system-model-track-label">
+                  Model CPU share (host)
+                </div>
+                <div
+                  class="progress-track system-model-stack"
+                  id="cpu-model-cpu-stack"
+                ></div>
+              </div>
+              <div class="system-model-track-block">
+                <div class="system-model-track-label">
+                  Model RAM share (host)
+                </div>
+                <div
+                  class="progress-track system-model-stack"
+                  id="cpu-model-ram-stack"
+                ></div>
+              </div>
+              <div class="system-model-list" id="cpu-model-list">
+                <div class="empty-state">No CPU-backed model running.</div>
+              </div>
+            </div>
+            <div class="usage-legend" aria-label="CPU and RAM legend">
+              <span class="usage-legend-item">
+                <span class="legend-swatch legend-swatch-system"></span>
+                Brown segment: other host usage (outside listed CPU models)
+              </span>
+            </div>
+          </div>
+        </section>
+      </section>
 
-          <section class="panel panel-form">
-            <div class="panel-head compact">
-              <div>
-                <span class="eyebrow">Validation</span>
-                <h2>Inference</h2>
-              </div>
-              <span class="panel-meta"
-                >Send a test prompt to a running OpenAI-compatible
-                endpoint.</span
+      <section
+        class="tab-panel"
+        id="tab-run"
+        role="tabpanel"
+        aria-label="Run"
+        hidden
+        data-tab-panel="run"
+      >
+        <section class="panel panel-form">
+          <div class="panel-head compact">
+            <div>
+              <span class="eyebrow">Deployment</span>
+              <h2>Run model</h2>
+            </div>
+            <span class="panel-meta"
+              >Launch with essential runtime settings.</span
+            >
+          </div>
+          <form id="run-form" class="form-grid">
+            <div class="field span-2">
+              <label for="run-model-id">Model ID</label>
+              <input
+                id="run-model-id"
+                name="model_id"
+                required
+                placeholder="Qwen/Qwen3-0.6B"
+              />
+            </div>
+            <div class="field">
+              <label for="run-port">Port</label
+              ><input
+                id="run-port"
+                name="port"
+                type="number"
+                value="8000"
+                min="1"
+                max="65535"
+              />
+            </div>
+            <div class="field">
+              <label for="run-device">Device</label
+              ><select id="run-device" name="device">
+                <option value="gpu" selected>gpu</option>
+                <option value="cpu">cpu</option>
+              </select>
+            </div>
+            <div class="field" id="run-gpu-field">
+              <label for="run-gpu-index">GPU index</label
+              ><input
+                id="run-gpu-index"
+                name="gpu_index"
+                type="number"
+                value="0"
+                min="0"
+              />
+            </div>
+            <div class="field" id="run-buffer-field">
+              <label for="run-buffer-gb">Buffer (GiB)</label
+              ><input
+                id="run-buffer-gb"
+                name="buffer_gb"
+                type="number"
+                step="0.1"
+                placeholder="Optional"
+              />
+            </div>
+            <div class="field" id="run-gpu-utilization-field">
+              <label for="run-gpu-utilization"
+                >GPU utilization ratio (manual)</label
+              ><input
+                id="run-gpu-utilization"
+                name="gpu_utilization"
+                type="number"
+                min="0.01"
+                max="1"
+                step="0.01"
+                placeholder="Optional (0..1)"
+              />
+            </div>
+            <div class="field" id="run-cpu-utilization-field">
+              <label for="run-cpu-utilization"
+                >CPU utilization ratio (manual)</label
+              ><input
+                id="run-cpu-utilization"
+                name="cpu_utilization"
+                type="number"
+                min="0.01"
+                max="1"
+                step="0.01"
+                placeholder="Optional (0..1)"
+              />
+            </div>
+            <div class="field" id="run-cpu-kv-cache-field">
+              <label for="run-cpu-kv-cache">CPU KV cache cap (GiB)</label
+              ><input
+                id="run-cpu-kv-cache"
+                name="cpu_kv_cache_space"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Optional (e.g. 4)"
+              />
+            </div>
+            <div class="field">
+              <label for="run-startup-timeout">Startup timeout (s)</label
+              ><input
+                id="run-startup-timeout"
+                name="startup_timeout"
+                type="number"
+                value="900"
+                min="10"
+              />
+            </div>
+            <div class="field">
+              <label for="run-max-num-seqs">Max num seqs</label
+              ><input
+                id="run-max-num-seqs"
+                name="max_num_seqs"
+                type="number"
+                value="1"
+                min="1"
+              />
+            </div>
+            <div class="field">
+              <label for="run-max-model-len">Max model len</label
+              ><input
+                id="run-max-model-len"
+                name="max_model_len"
+                type="number"
+                value="16384"
+                min="1"
+              />
+            </div>
+            <div class="field">
+              <label for="run-quantization">Quantization</label
+              ><input id="run-quantization" name="quantization" value="auto" />
+            </div>
+            <div class="field">
+              <label for="run-kv-dtype">KV cache dtype</label
+              ><select id="run-kv-dtype" name="kv_cache_dtype">
+                <option value="auto" selected>auto</option>
+                <option value="bfloat16">bfloat16</option>
+                <option value="fp8">fp8</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="run-tool-parser">Tool call parser</label
+              ><input
+                id="run-tool-parser"
+                name="tool_call_parser"
+                placeholder="Optional"
+              />
+            </div>
+            <div class="field">
+              <label for="run-reasoning-parser">Reasoning parser</label
+              ><input
+                id="run-reasoning-parser"
+                name="reasoning_parser"
+                placeholder="Optional"
+              />
+            </div>
+            <div class="field">
+              <label for="run-thinking">Enable thinking</label
+              ><select id="run-thinking" name="enable_thinking">
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="run-long-context">Allow long context override</label
+              ><select id="run-long-context" name="allow_long_context_override">
+                <option value="false">false</option>
+                <option value="true">true</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="run-trust-remote-code">Trust remote code</label
+              ><select id="run-trust-remote-code" name="trust_remote_code">
+                <option value="false" selected>false</option>
+                <option value="true">true</option>
+              </select>
+            </div>
+            <div class="form-actions span-2">
+              <button type="submit">Launch model</button>
+              <span class="hint"
+                >Tasks appear on the right and logs can be opened as a full
+                console.</span
               >
             </div>
-            <form id="infer-form" class="form-grid">
-              <div class="field span-2">
-                <label for="infer-target">Running model</label
-                ><select id="infer-target" name="infer_target" required>
-                  <option value="">No running model available</option>
-                </select>
-                <span class="field-help" id="infer-endpoint-hint"
-                  >Endpoint will be filled automatically from the selected
-                  container.</span
-                >
+            <div class="run-estimate span-2" id="run-estimate-card">
+              <div class="run-estimate-header">
+                <span class="run-estimate-icon" id="run-estimate-icon">⚡</span>
+                <span class="run-estimate-status" id="run-estimate-status">
+                  Fill the run fields to compute an analytical VRAM estimate.
+                </span>
               </div>
-              <div class="field">
-                <label for="infer-max-tokens">Max tokens</label
-                ><input
-                  id="infer-max-tokens"
-                  name="max_tokens"
-                  type="number"
-                  value="128"
-                  min="1"
-                />
+              <div class="estimate-bar-wrap" id="estimate-bar-wrap">
+                <div class="estimate-bar-track" id="estimate-bar-track">
+                  <span
+                    class="estimate-segment estimate-seg-weights"
+                    id="estimate-seg-weights"
+                    data-tooltip="Model weights"
+                  ></span>
+                  <span
+                    class="estimate-segment estimate-seg-kv"
+                    id="estimate-seg-kv"
+                    data-tooltip="KV cache"
+                  ></span>
+                  <span
+                    class="estimate-segment estimate-seg-overhead"
+                    id="estimate-seg-overhead"
+                    data-tooltip="Runtime overhead"
+                  ></span>
+                  <span
+                    class="estimate-segment estimate-seg-free"
+                    id="estimate-seg-free"
+                    data-tooltip="Free VRAM"
+                  ></span>
+                </div>
+                <div class="estimate-bar-legend">
+                  <span class="estimate-legend-item"
+                    ><span class="estimate-legend-dot seg-weights"></span
+                    >Weights</span
+                  >
+                  <span class="estimate-legend-item"
+                    ><span class="estimate-legend-dot seg-kv"></span>KV
+                    cache</span
+                  >
+                  <span class="estimate-legend-item"
+                    ><span class="estimate-legend-dot seg-overhead"></span
+                    >Overhead</span
+                  >
+                  <span class="estimate-legend-item"
+                    ><span class="estimate-legend-dot seg-free"></span
+                    >Free</span
+                  >
+                </div>
               </div>
-              <div class="field">
-                <label for="infer-temperature">Temperature</label
-                ><input
-                  id="infer-temperature"
-                  name="temperature"
-                  type="number"
-                  step="0.1"
-                  value="0.2"
-                />
+              <div class="estimate-metrics-grid" id="estimate-metrics-grid">
+                <div class="estimate-metric-card">
+                  <span class="estimate-metric-label">Weights</span>
+                  <strong class="estimate-metric-value" id="em-weights"
+                    >—</strong
+                  >
+                  <span class="estimate-metric-unit">GiB</span>
+                </div>
+                <div class="estimate-metric-card">
+                  <span class="estimate-metric-label">KV cache</span>
+                  <strong class="estimate-metric-value" id="em-kv">—</strong>
+                  <span class="estimate-metric-unit">GiB</span>
+                </div>
+                <div class="estimate-metric-card">
+                  <span class="estimate-metric-label">Overhead</span>
+                  <strong class="estimate-metric-value" id="em-overhead"
+                    >—</strong
+                  >
+                  <span class="estimate-metric-unit">GiB</span>
+                </div>
+                <div class="estimate-metric-card">
+                  <span class="estimate-metric-label">Total est.</span>
+                  <strong class="estimate-metric-value" id="em-total">—</strong>
+                  <span class="estimate-metric-unit">GiB</span>
+                </div>
+                <div class="estimate-metric-card">
+                  <span class="estimate-metric-label">Available</span>
+                  <strong class="estimate-metric-value" id="em-available"
+                    >—</strong
+                  >
+                  <span class="estimate-metric-unit">GiB</span>
+                </div>
+                <div class="estimate-metric-card">
+                  <span class="estimate-metric-label">Max seqs</span>
+                  <strong class="estimate-metric-value" id="em-maxseqs"
+                    >—</strong
+                  >
+                  <span class="estimate-metric-unit">estimated</span>
+                </div>
               </div>
-              <div class="field span-2">
-                <label for="infer-timeout">Timeout (s)</label
-                ><input
-                  id="infer-timeout"
-                  name="timeout"
-                  type="number"
-                  value="120"
-                  min="1"
-                />
+              <div class="estimate-footer" id="estimate-footer">
+                <span class="estimate-confidence" id="estimate-confidence">
+                  <span
+                    class="estimate-confidence-dot"
+                    id="estimate-confidence-dot"
+                  ></span>
+                  <span id="estimate-confidence-label">Waiting for input…</span>
+                </span>
+                <span
+                  class="estimate-footer-meta"
+                  id="estimate-footer-meta"
+                ></span>
               </div>
-              <div class="field span-2">
-                <label for="infer-prompt">Prompt</label
-                ><textarea
-                  id="infer-prompt"
-                  name="prompt"
-                  required
-                  placeholder="Explain the current model status..."
-                ></textarea>
-              </div>
-              <div class="field span-2">
-                <label for="infer-images">Images (optional)</label
-                ><input
-                  id="infer-images"
-                  name="images"
-                  type="file"
-                  multiple
-                  accept="image/*"
-                />
-                <span class="field-help"
-                  >Upload one or more images to include in your prompt. Images
-                  are converted to base64 for multi-modal models.</span
-                >
-              </div>
-              <div
-                id="infer-images-preview"
-                class="field span-2 infer-images-preview"
-                hidden
-              >
-                <div class="field-help">Selected images:</div>
-                <div id="infer-images-list" class="infer-images-list"></div>
-              </div>
-              <div class="form-actions infer-actions span-2">
-                <button type="submit" id="infer-submit-button">
-                  Run inference
-                </button>
-                <button
-                  type="button"
-                  id="infer-stop-button"
-                  class="danger-button"
-                  disabled
-                >
-                  Stop inference
-                </button>
-              </div>
-            </form>
-            <div class="response-block">
-              <div class="response-head">
-                <span class="eyebrow">Output</span>
-                <span class="panel-meta">Latest inference response</span>
-              </div>
-              <div class="infer-metrics" id="infer-metrics">
-                No metrics yet.
-              </div>
-              <pre id="infer-output">No inference executed yet.</pre>
             </div>
-          </section>
-        </div>
+          </form>
+        </section>
+      </section>
 
-        <div class="column-stack">
-          <section class="panel">
-            <div class="panel-head compact">
-              <div>
-                <span class="eyebrow">Background jobs</span>
-                <h2>Run tasks</h2>
-              </div>
-              <span class="panel-meta"
-                >Track async launches and open both task and container
-                logs.</span
+      <section
+        class="tab-panel"
+        id="tab-inference"
+        role="tabpanel"
+        aria-label="Inference"
+        hidden
+        data-tab-panel="inference"
+      >
+        <section class="panel panel-form">
+          <div class="panel-head compact">
+            <div>
+              <span class="eyebrow">Validation</span>
+              <h2>Inference</h2>
+            </div>
+            <span class="panel-meta"
+              >Send a test prompt to a running endpoint.</span
+            >
+          </div>
+          <form id="infer-form" class="form-grid">
+            <div class="field span-2">
+              <label for="infer-target">Running model</label
+              ><select id="infer-target" name="infer_target" required>
+                <option value="">No running model available</option>
+              </select>
+              <span class="field-help" id="infer-endpoint-hint"
+                >Endpoint will be filled automatically from the selected
+                container.</span
               >
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th>Status</th>
-                    <th>Container</th>
-                    <th>Message</th>
-                    <th>Started</th>
-                    <th>Logs</th>
-                  </tr>
-                </thead>
-                <tbody id="tasks-body"></tbody>
-              </table>
+            <div class="field">
+              <label for="infer-max-tokens">Max tokens</label
+              ><input
+                id="infer-max-tokens"
+                name="max_tokens"
+                type="number"
+                value="128"
+                min="1"
+              />
             </div>
-          </section>
+            <div class="field">
+              <label for="infer-temperature">Temperature</label
+              ><input
+                id="infer-temperature"
+                name="temperature"
+                type="number"
+                step="0.1"
+                value="0.2"
+              />
+            </div>
+            <div class="field span-2">
+              <label for="infer-timeout">Timeout (s)</label
+              ><input
+                id="infer-timeout"
+                name="timeout"
+                type="number"
+                value="120"
+                min="1"
+              />
+            </div>
+            <div class="field span-2">
+              <label for="infer-prompt">Prompt</label
+              ><textarea
+                id="infer-prompt"
+                name="prompt"
+                required
+                placeholder="Explain the current model status..."
+              ></textarea>
+            </div>
+            <div class="field span-2">
+              <label for="infer-images">Images (optional)</label
+              ><input
+                id="infer-images"
+                name="images"
+                type="file"
+                multiple
+                accept="image/*"
+              />
+              <span class="field-help"
+                >Upload one or more images to include in your prompt. Images are
+                converted to base64 for multi-modal models.</span
+              >
+            </div>
+            <div
+              id="infer-images-preview"
+              class="field span-2 infer-images-preview"
+              hidden
+            >
+              <div class="field-help">Selected images:</div>
+              <div id="infer-images-list" class="infer-images-list"></div>
+            </div>
+            <div class="form-actions infer-actions span-2">
+              <button type="submit" id="infer-submit-button">
+                Run inference
+              </button>
+              <button
+                type="button"
+                id="infer-stop-button"
+                class="danger-button"
+                disabled
+              >
+                Stop inference
+              </button>
+            </div>
+          </form>
+          <div class="response-block">
+            <div class="response-head">
+              <span class="eyebrow">Output</span>
+              <span class="panel-meta">Latest inference response</span>
+            </div>
+            <div class="infer-metrics" id="infer-metrics">No metrics yet.</div>
+            <pre id="infer-output">No inference executed yet.</pre>
+          </div>
+        </section>
+      </section>
 
-          <section class="panel">
-            <div class="panel-head compact">
-              <div>
-                <span class="eyebrow">Runtime state</span>
-                <h2>Containers</h2>
-              </div>
-              <span class="panel-meta"
-                >Stop, remove cache, or inspect logs from active
-                workloads.</span
-              >
+      <section
+        class="tab-panel"
+        id="tab-tasks"
+        role="tabpanel"
+        aria-label="Tasks"
+        hidden
+        data-tab-panel="tasks"
+      >
+        <section class="panel">
+          <div class="panel-head compact">
+            <div>
+              <span class="eyebrow">Background jobs</span>
+              <h2>Run tasks</h2>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Model</th>
-                    <th>Status</th>
-                    <th>Port</th>
-                    <th>Backend</th>
-                    <th>GPU</th>
-                    <th>Actions</th>
-                    <th>Logs</th>
-                  </tr>
-                </thead>
-                <tbody id="containers-body"></tbody>
-              </table>
-            </div>
-          </section>
+            <span class="panel-meta">Track launches and open logs.</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Status</th>
+                  <th>Container</th>
+                  <th>Message</th>
+                  <th>Started</th>
+                  <th>Logs</th>
+                </tr>
+              </thead>
+              <tbody id="tasks-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
 
-          <section class="panel">
-            <div class="panel-head compact">
-              <div>
-                <span class="eyebrow">Storage</span>
-                <h2>Cached models</h2>
-              </div>
-              <span class="panel-meta"
-                >Clean the local Hugging Face cache safely.</span
-              >
+      <section
+        class="tab-panel"
+        id="tab-containers"
+        role="tabpanel"
+        aria-label="Containers"
+        hidden
+        data-tab-panel="containers"
+      >
+        <section class="panel">
+          <div class="panel-head compact">
+            <div>
+              <span class="eyebrow">Runtime state</span>
+              <h2>Containers</h2>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th>Size (GiB)</th>
-                    <th>Path</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody id="cache-body"></tbody>
-              </table>
+            <span class="panel-meta">Manage active workloads and logs.</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Model</th>
+                  <th>Status</th>
+                  <th>Port</th>
+                  <th>Backend</th>
+                  <th>GPU</th>
+                  <th>Actions</th>
+                  <th>Logs</th>
+                </tr>
+              </thead>
+              <tbody id="containers-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section
+        class="tab-panel"
+        id="tab-cache"
+        role="tabpanel"
+        aria-label="Cache"
+        hidden
+        data-tab-panel="cache"
+      >
+        <section class="panel">
+          <div class="panel-head compact">
+            <div>
+              <span class="eyebrow">Storage</span>
+              <h2>Cached models</h2>
             </div>
-          </section>
-        </div>
-      </div>
+            <span class="panel-meta">Manage local Hugging Face cache.</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Size (GiB)</th>
+                  <th>Path</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="cache-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </main>
 
     <div class="logs-modal" id="logs-modal" aria-hidden="true">

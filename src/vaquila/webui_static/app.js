@@ -55,6 +55,8 @@ const logsCopy = document.getElementById("logs-copy");
 const logsClose = document.getElementById("logs-close");
 const logsRefresh = document.getElementById("logs-refresh");
 const themeToggle = document.getElementById("theme-toggle");
+const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
+const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
 const MAX_NOTIFICATIONS = 5;
 const THEME_STORAGE_KEY = "vaquila.webui.theme";
@@ -123,6 +125,67 @@ function initTheme() {
       // Ignore storage errors and keep the in-memory theme state.
     }
   });
+}
+
+function activateTab(tabName, options = {}) {
+  const { updateHash = true } = options;
+  const normalized = String(tabName || "overview").toLowerCase();
+
+  if (!tabButtons.length || !tabPanels.length) {
+    return;
+  }
+
+  let hasMatch = false;
+
+  tabButtons.forEach((button) => {
+    const target = String(button.dataset.tabTarget || "").toLowerCase();
+    const isActive = target === normalized;
+    if (isActive) {
+      hasMatch = true;
+    }
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+
+  const finalTab = hasMatch ? normalized : "overview";
+
+  tabPanels.forEach((panel) => {
+    const panelName = String(panel.dataset.tabPanel || "").toLowerCase();
+    const isActive = panelName === finalTab;
+    panel.classList.toggle("is-active", isActive);
+    if (isActive) {
+      panel.removeAttribute("hidden");
+    } else {
+      panel.setAttribute("hidden", "");
+    }
+  });
+
+  if (updateHash) {
+    try {
+      window.history.replaceState(null, "", `#${finalTab}`);
+    } catch {
+      // Ignore history update issues.
+    }
+  }
+}
+
+function initTabs() {
+  if (!tabButtons.length || !tabPanels.length) {
+    return;
+  }
+
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = String(button.dataset.tabTarget || "overview");
+      activateTab(target, { updateHash: true });
+    });
+  });
+
+  const hashTab = String(window.location.hash || "")
+    .replace(/^#/, "")
+    .trim()
+    .toLowerCase();
+  activateTab(hashTab || "overview", { updateHash: !!hashTab });
 }
 
 function setStatus(message, type = "info") {
@@ -1912,6 +1975,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 initTheme();
+initTabs();
 syncRunDeviceFields();
 refreshAll();
 scheduleRunEstimate();
