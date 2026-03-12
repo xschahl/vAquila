@@ -36,6 +36,30 @@ _KV_CONCURRENCY_RE = re.compile(
 )
 
 
+def _render_progress_bar(percent: int, width: int = 24) -> str:
+    """Render a compact ASCII progress bar from a 0-100 percentage."""
+    clamped = max(0, min(100, percent))
+    filled = int(round((clamped / 100.0) * width))
+    filled = max(0, min(width, filled))
+    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
+
+
+def _extract_hf_progress(log_text: str) -> tuple[int, int, int] | None:
+    """Extract latest Hugging Face shard download progress from startup logs."""
+    matches = _HF_PROGRESS_RE.findall(log_text)
+    if not matches:
+        return None
+
+    percent_text, current_text, total_text = matches[-1]
+    with suppress(ValueError):
+        percent = int(percent_text)
+        current = int(current_text)
+        total = int(total_text)
+        return percent, current, total
+
+    return None
+
+
 def clean_log_line(line: str) -> str:
     """Clean a vLLM log prefix for CLI display."""
     cleaned = re.sub(r"^\([^)]*\)\s*", "", line).strip()
@@ -125,6 +149,8 @@ def wait_until_model_ready(console: Console, container_name: str, timeout_second
     started = time.monotonic()
     last_hint = "Starting vLLM server..."
     last_log_text = ""
+    last_reported_hf_percent = -1
+    last_download_phase_hint = ""
 
     with console.status(f"[cyan]{last_hint}[/cyan]", spinner="dots") as status:
         while time.monotonic() - started < timeout_seconds:
@@ -158,6 +184,19 @@ def wait_until_model_ready(console: Console, container_name: str, timeout_second
             if hint != last_hint:
                 last_hint = hint
                 status.update(f"[cyan]{hint}[/cyan]")
+
+            hf_progress = _extract_hf_progress(log_text)
+            if hf_progress is not None:
+                percent, current, total = hf_progress
+                if percent >= 100 or percent - last_reported_hf_percent >= 2:
+                    bar = _render_progress_bar(percent)
+                    console.print(
+                        f"[startup] Hugging Face download {bar} {percent}% ({current}/{total} shards)"
+                    )
+                    last_reported_hf_percent = percent
+            elif "download" in hint.lower() and hint != last_download_phase_hint:
+                console.print(f"[startup] {hint}")
+                last_download_phase_hint = hint
 
             if any(marker in log_text for marker in _READY_MARKERS):
                 return

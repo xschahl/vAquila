@@ -254,6 +254,21 @@ td,
   background: rgba(255, 255, 255, 0.09);
 }
 
+button:disabled,
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.48;
+  box-shadow: none;
+  transform: none;
+  filter: saturate(0.45);
+}
+
+button:disabled:hover,
+button[aria-disabled="true"]:hover {
+  box-shadow: none;
+  transform: none;
+}
+
 .toast-item.toast-success {
   border-color: rgba(63, 244, 194, 0.3);
 }

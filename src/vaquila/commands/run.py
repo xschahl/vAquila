@@ -29,6 +29,7 @@ from vaquila.cli_helpers import (
 )
 from vaquila.config import CONFIG
 from vaquila.docker_service import (
+    ensure_host_port_available,
     get_container,
     list_managed_containers,
     run_model_container,
@@ -207,6 +208,10 @@ def cmd_run(
 ) -> None:
     """Launch a model in a background vLLM container."""
     try:
+        def emit_download_progress(message: str) -> None:
+            """Stream download progress lines to the active console output."""
+            console.print(message)
+
         compute_backend = device.lower().strip()
         if compute_backend not in {"gpu", "cpu"}:
             raise VaquilaError("Invalid --device value. Supported values: gpu, cpu.")
@@ -225,6 +230,8 @@ def cmd_run(
                 "Manual mode on GPU requires --gpu-utilization. "
                 "Provide both --gpu-utilization and optional --cpu-utilization."
             )
+
+        ensure_host_port_available(port)
 
         auto_buffer = 2.0 if platform.system() == "Windows" else 1.5
         buffer = buffer_gb if buffer_gb is not None else auto_buffer
@@ -317,6 +324,7 @@ def cmd_run(
                     kv_cache_dtype=resolved_kv_cache_dtype,
                     config=CONFIG,
                     compute_backend="cpu",
+                    progress_callback=emit_download_progress,
                 )
 
             try:
@@ -385,6 +393,7 @@ def cmd_run(
                     quantization=resolved_quantization,
                     kv_cache_dtype=resolved_kv_cache_dtype,
                     config=CONFIG,
+                    progress_callback=emit_download_progress,
                 )
 
             wait_until_model_ready(console, container.name, timeout_seconds=startup_timeout)
@@ -595,6 +604,7 @@ def cmd_run(
                     quantization=resolved_quantization,
                     kv_cache_dtype=resolved_kv_cache_dtype,
                     config=CONFIG,
+                    progress_callback=emit_download_progress,
                 )
 
             try:
@@ -753,6 +763,7 @@ def cmd_run(
                         quantization=resolved_quantization,
                         kv_cache_dtype=resolved_kv_cache_dtype,
                         config=CONFIG,
+                        progress_callback=emit_download_progress,
                     )
 
                 wait_until_model_ready(console, tuned_container.name, timeout_seconds=startup_timeout)
@@ -790,6 +801,7 @@ def cmd_run(
                             quantization=resolved_quantization,
                             kv_cache_dtype=resolved_kv_cache_dtype,
                             config=CONFIG,
+                            progress_callback=emit_download_progress,
                         )
 
                     wait_until_model_ready(console, container.name, timeout_seconds=startup_timeout)
@@ -842,6 +854,7 @@ def cmd_run(
                         quantization=resolved_quantization,
                         kv_cache_dtype=resolved_kv_cache_dtype,
                         config=CONFIG,
+                        progress_callback=emit_download_progress,
                     )
 
                 wait_until_model_ready(console, container.name, timeout_seconds=startup_timeout)

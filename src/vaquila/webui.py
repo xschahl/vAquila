@@ -37,6 +37,7 @@ from vaquila.commands import run as run_command_module
 from vaquila.commands.run import cmd_run
 from vaquila.config import CONFIG
 from vaquila.docker_service import (
+    ensure_host_port_available,
     get_container,
     list_managed_containers,
     stop_containers_by_name,
@@ -273,6 +274,19 @@ def _normalize_optional_text(value: str | None) -> str:
     if value is None:
         return ""
     return value.strip()
+
+
+def _validate_requested_run_port(port: int) -> dict[str, object] | None:
+    """Validate that the selected host port can be used for a new model."""
+    try:
+        ensure_host_port_available(port)
+    except VaquilaError as exc:
+        return {
+            "ok": False,
+            "port_available": False,
+            "message": str(exc),
+        }
+    return None
 
 
 def _remove_model_cache_or_raise(model_id: str) -> bool:
@@ -806,6 +820,10 @@ def create_web_app() -> FastAPI:
     @app.post("/api/run")
     def run_model(payload: RunRequest) -> dict[str, object]:
         """Queue and execute a model launch task."""
+        port_validation = _validate_requested_run_port(payload.port)
+        if port_validation is not None:
+            raise HTTPException(status_code=400, detail=str(port_validation["message"]))
+
         task_id = str(uuid4())
         task = RunTask(
             id=task_id,
@@ -829,16 +847,22 @@ def create_web_app() -> FastAPI:
     @app.post("/api/run/estimate")
     def estimate_run(payload: RunRequest) -> dict[str, object]:
         """Estimate run feasibility and suggested capacity for the selected runtime."""
+        port_validation = _validate_requested_run_port(payload.port)
+        if port_validation is not None:
+            return port_validation
+
         selected_device = payload.device.lower().strip()
         if selected_device not in {"gpu", "cpu"}:
             return {
                 "ok": False,
+                "port_available": True,
                 "message": "Invalid device. Supported values: gpu, cpu.",
             }
 
         if payload.gpu_utilization is not None and selected_device == "cpu":
             return {
                 "ok": False,
+                "port_available": True,
                 "message": "gpu_utilization cannot be used when device=cpu.",
             }
 
@@ -849,12 +873,14 @@ def create_web_app() -> FastAPI:
         ):
             return {
                 "ok": False,
+                "port_available": True,
                 "message": "Manual GPU mode requires gpu_utilization when cpu_utilization is set.",
             }
 
         if payload.gpu_utilization is not None or payload.cpu_utilization is not None:
             return {
                 "ok": True,
+                "port_available": True,
                 "device": selected_device,
                 "manual_mode": True,
                 "message": "Manual utilization mode enabled: estimation and optimization are bypassed.",
@@ -881,12 +907,14 @@ def create_web_app() -> FastAPI:
         except VaquilaError as exc:
             return {
                 "ok": False,
+                "port_available": True,
                 "message": str(exc),
             }
 
         if selected_device == "cpu":
             return {
                 "ok": True,
+                "port_available": True,
                 "device": "cpu",
                 "message": "CPU mode selected: VRAM estimate is not applicable.",
                 "fits_current_settings": True,
@@ -908,6 +936,7 @@ def create_web_app() -> FastAPI:
         except VaquilaError as exc:
             return {
                 "ok": False,
+                "port_available": True,
                 "message": str(exc),
             }
 
@@ -930,6 +959,7 @@ def create_web_app() -> FastAPI:
             if not running_on_same_gpu:
                 return {
                     "ok": False,
+                    "port_available": True,
                     "message": str(exc),
                 }
             try:
@@ -940,6 +970,7 @@ def create_web_app() -> FastAPI:
             except VaquilaError as adaptive_exc:
                 return {
                     "ok": False,
+                    "port_available": True,
                     "message": str(adaptive_exc),
                 }
 
@@ -1009,6 +1040,7 @@ def create_web_app() -> FastAPI:
 
         return {
             "ok": True,
+            "port_available": True,
             "device": "gpu",
             "message": message,
             "fits_current_settings": fits_current_settings,
