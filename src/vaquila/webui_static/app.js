@@ -1059,10 +1059,14 @@ function compactProgressLogs(rawLogs) {
   const progressIndexByKey = new Map();
 
   let activeDockerImage = "default";
-  const dockerPullStartRe = /^\[(?:stdout|stderr)\]\s*\[docker\]\s+Pulling image:\s+(.+)$/i;
-  const dockerImageReadyRe = /^\[(?:stdout|stderr)\]\s*\[docker\]\s+Image ready:\s+(.+)$/i;
-  const dockerPullProgressRe = /^\[(?:stdout|stderr)\]\s*\[docker\]\s+Pull progress\s+/i;
-  const hfProgressRe = /^\[(?:stdout|stderr)\]\s*\[startup\]\s+Hugging Face download\s+/i;
+  const dockerPullStartRe =
+    /^\[(?:stdout|stderr)\]\s*\[docker\]\s+Pulling image:\s+(.+)$/i;
+  const dockerImageReadyRe =
+    /^\[(?:stdout|stderr)\]\s*\[docker\]\s+Image ready:\s+(.+)$/i;
+  const dockerPullProgressRe =
+    /^\[(?:stdout|stderr)\]\s*\[docker\]\s+Pull progress\s+/i;
+  const hfProgressRe =
+    /^\[(?:stdout|stderr)\]\s*\[startup\]\s+Hugging Face download\s+/i;
 
   for (const rawLine of lines) {
     const line = String(rawLine || "");
