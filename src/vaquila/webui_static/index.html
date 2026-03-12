@@ -279,8 +279,10 @@
                 id="run-model-id"
                 name="model_id"
                 required
+                list="hf-model-suggestions"
                 placeholder="Qwen/Qwen3-0.6B"
               />
+              <datalist id="hf-model-suggestions"></datalist>
             </div>
             <div class="field">
               <label for="run-port">Port</label
@@ -749,7 +751,16 @@
               <span class="eyebrow">Storage</span>
               <h2>Cached models</h2>
             </div>
-            <span class="panel-meta">Manage local Hugging Face cache.</span>
+            <div class="status-actions">
+              <span class="panel-meta">Manage local Hugging Face cache.</span>
+              <button
+                type="button"
+                class="ghost-button"
+                id="cache-check-all-updates"
+              >
+                Check all updates
+              </button>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -758,6 +769,7 @@
                   <th>Model</th>
                   <th>Size (GiB)</th>
                   <th>Path</th>
+                  <th>Update</th>
                   <th>Action</th>
                 </tr>
               </thead>

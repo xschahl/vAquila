@@ -6,14 +6,18 @@ from vaquila.helpers.cache import (
     dir_size_bytes,
     extract_model_context_limit,
     fetch_remote_model_config,
+    fetch_remote_model_revision,
     format_gb,
+    get_model_update_status,
     hub_cache_root,
     list_cached_model_dirs,
     model_cache_repo_dir,
     purge_model_cache,
     read_cached_model_config,
+    read_cached_model_revision,
     resolve_model_config,
     resolve_model_context_limit,
+    update_model_cache,
 )
 from vaquila.helpers.context import resolve_context_strategy
 from vaquila.helpers.rebalance import (
@@ -61,7 +65,9 @@ __all__ = [
     "extract_root_error",
     "extract_startup_hint",
     "fetch_remote_model_config",
+    "fetch_remote_model_revision",
     "format_gb",
+    "get_model_update_status",
     "hub_cache_root",
     "is_retryable_vram_error",
     "launch_plan_from_container",
@@ -71,6 +77,7 @@ __all__ = [
     "purge_model_cache",
     "ratio_candidates",
     "read_cached_model_config",
+    "read_cached_model_revision",
     "resolve_model_config",
     "resolve_kv_cache_dtype",
     "resolve_quantization_strategy",
@@ -79,5 +86,6 @@ __all__ = [
     "resolve_model_context_limit",
     "resolve_run_runtime_settings",
     "suggest_ratio_from_kv_cache_error",
+    "update_model_cache",
     "wait_until_model_ready",
 ]

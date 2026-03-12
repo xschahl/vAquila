@@ -7,6 +7,8 @@ import os
 import shutil
 from contextlib import suppress
 from pathlib import Path
+from urllib.parse import quote
+from urllib.error import HTTPError
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -109,6 +111,19 @@ def read_cached_model_config(model_id: str) -> dict[str, object] | None:
     return None
 
 
+def read_cached_model_revision(model_id: str) -> str | None:
+    """Read local Hugging Face `refs/main` revision for one cached model."""
+    repo_dir = hub_cache_root() / model_cache_repo_dir(model_id)
+    refs_main = repo_dir / "refs" / "main"
+    if not refs_main.exists():
+        return None
+    try:
+        revision = refs_main.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return revision or None
+
+
 def fetch_remote_model_config(model_id: str) -> dict[str, object] | None:
     """Fetch `config.json` from Hugging Face Hub as a network fallback."""
     url = f"https://huggingface.co/{model_id}/resolve/main/config.json"
@@ -126,6 +141,101 @@ def fetch_remote_model_config(model_id: str) -> dict[str, object] | None:
     if isinstance(payload, dict):
         return payload
     return None
+
+
+def fetch_remote_model_revision(model_id: str) -> str | None:
+    """Fetch current remote model revision (`sha`) from Hugging Face Hub."""
+    encoded_model_id = quote(model_id.strip(), safe="")
+    url = f"https://huggingface.co/api/models/{encoded_model_id}"
+    try:
+        with urlopen(url, timeout=10) as response:
+            body = response.read().decode("utf-8")
+    except (URLError, TimeoutError, ValueError, HTTPError):
+        return None
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    sha = payload.get("sha")
+    if isinstance(sha, str):
+        normalized = sha.strip()
+        return normalized or None
+    return None
+
+
+def get_model_update_status(model_id: str) -> dict[str, object]:
+    """Return local/remote revision comparison for one cached model."""
+    local_revision = read_cached_model_revision(model_id)
+    remote_revision = fetch_remote_model_revision(model_id)
+
+    if local_revision is None:
+        return {
+            "model_id": model_id,
+            "local_revision": None,
+            "remote_revision": remote_revision,
+            "update_available": False,
+            "message": "Local cache revision is unavailable.",
+        }
+
+    if remote_revision is None:
+        return {
+            "model_id": model_id,
+            "local_revision": local_revision,
+            "remote_revision": None,
+            "update_available": False,
+            "message": "Unable to reach Hugging Face to check updates.",
+        }
+
+    update_available = local_revision != remote_revision
+    return {
+        "model_id": model_id,
+        "local_revision": local_revision,
+        "remote_revision": remote_revision,
+        "update_available": update_available,
+        "message": "Update available." if update_available else "Cache is up to date.",
+    }
+
+
+def update_model_cache(model_id: str) -> dict[str, object]:
+    """Download latest Hub snapshot for one model into local cache."""
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:  # pragma: no cover
+        raise VaquilaError(
+            "huggingface_hub is required for cache updates. "
+            "Install dependencies again and retry."
+        ) from exc
+
+    before_revision = read_cached_model_revision(model_id)
+    remote_revision = fetch_remote_model_revision(model_id)
+
+    snapshot_download(
+        repo_id=model_id,
+        revision="main",
+        cache_dir=str(CONFIG.hf_cache_host_path),
+        resume_download=True,
+        local_files_only=False,
+    )
+
+    after_revision = read_cached_model_revision(model_id)
+    updated = (
+        before_revision is None
+        or (after_revision is not None and before_revision != after_revision)
+        or (remote_revision is not None and after_revision == remote_revision)
+    )
+
+    return {
+        "model_id": model_id,
+        "updated": updated,
+        "local_revision_before": before_revision,
+        "local_revision_after": after_revision,
+        "remote_revision": remote_revision,
+    }
 
 
 def resolve_model_context_limit(model_id: str) -> int | None:
