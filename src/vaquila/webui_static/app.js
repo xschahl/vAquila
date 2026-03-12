@@ -2,6 +2,7 @@ const toast = document.getElementById("toast");
 const notificationCenter = document.getElementById("notification-center");
 const statusHealth = document.getElementById("status-health");
 const runForm = document.getElementById("run-form");
+const runSubmitButton = runForm?.querySelector('button[type="submit"]');
 const runEstimateCard = document.getElementById("run-estimate-card");
 const runEstimateStatus = document.getElementById("run-estimate-status");
 const runEstimateMetrics = document.getElementById("run-estimate-metrics");
@@ -45,6 +46,7 @@ const statTasks = document.getElementById("stat-tasks");
 const logsModal = document.getElementById("logs-modal");
 const logsTarget = document.getElementById("logs-target");
 const logsOutput = document.getElementById("logs-output");
+const logsCopy = document.getElementById("logs-copy");
 const logsClose = document.getElementById("logs-close");
 const logsRefresh = document.getElementById("logs-refresh");
 const themeToggle = document.getElementById("theme-toggle");
@@ -59,6 +61,7 @@ let lastLogsErrorKey = null;
 let tasksSnapshotReady = false;
 let themeTransitionTimer = null;
 let runEstimateTimer = null;
+let runLaunchBlockedReason = "";
 
 const taskStates = new Map();
 
@@ -388,6 +391,16 @@ function formatEstimateRatio(value) {
   return value.toFixed(3);
 }
 
+function setRunLaunchBlocked(blocked, reason = "") {
+  runLaunchBlockedReason = blocked ? String(reason || "Launch is blocked.") : "";
+
+  if (runSubmitButton) {
+    runSubmitButton.disabled = blocked;
+    runSubmitButton.title = blocked ? runLaunchBlockedReason : "";
+    runSubmitButton.setAttribute("aria-disabled", blocked ? "true" : "false");
+  }
+}
+
 function setRunEstimateState(state, statusText, options = {}) {
   if (!runEstimateCard) return;
 
@@ -503,6 +516,8 @@ function setRunEstimateState(state, statusText, options = {}) {
 }
 
 function renderRunEstimate(result) {
+  setRunLaunchBlocked(result?.port_available === false, result?.message || "");
+
   if (!result || result.ok !== true) {
     setRunEstimateState(
       "error",
@@ -606,6 +621,7 @@ async function refreshRunEstimate() {
 
   const payload = getFormPayload(runForm);
   if (!payload.model_id || String(payload.model_id).trim() === "") {
+    setRunLaunchBlocked(true, "Model ID is required.");
     setRunEstimateState("warn", "Model ID required", {
       footerText:
         "Enter a model id to compute analytical capacity and VRAM estimate.",
@@ -628,6 +644,7 @@ async function refreshRunEstimate() {
     });
     renderRunEstimate(result);
   } catch (error) {
+    setRunLaunchBlocked(false);
     setRunEstimateState("error", "VRAM estimate failed", {
       footerText: error.message || "Unable to compute run estimate.",
     });
@@ -993,6 +1010,38 @@ function closeLogsModal() {
   if (logsInterval) {
     clearInterval(logsInterval);
     logsInterval = null;
+  }
+}
+
+async function copyLogsToClipboard() {
+  const text = String(logsOutput?.textContent || "").trim();
+  if (!text) {
+    notify("No logs available to copy.", "warning", "Copy logs");
+    setStatus("No logs available to copy.", "error");
+    return;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(logsOutput);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      const copied = document.execCommand("copy");
+      selection?.removeAllRanges();
+      if (!copied) {
+        throw new Error("Clipboard copy command failed.");
+      }
+    }
+
+    notify("Logs copied to clipboard.", "success", "Copy logs");
+    setStatus("Logs copied to clipboard.", "ok");
+  } catch (error) {
+    notify("Unable to copy logs to clipboard.", "error", "Copy logs", 6500);
+    setStatus(`Unable to copy logs: ${error.message || "unknown error"}`, "error");
   }
 }
 
@@ -1451,6 +1500,9 @@ runForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
     syncRunDeviceFields();
+    if (runLaunchBlockedReason) {
+      throw new Error(runLaunchBlockedReason);
+    }
     const payload = getFormPayload(runForm);
     notify(`Launching ${payload.model_id}...`, "info", "Launch started");
     setStatus(`Launching ${payload.model_id}...`, "ok");
@@ -1632,6 +1684,9 @@ logsClose.addEventListener("click", closeLogsModal);
 logsRefresh.addEventListener("click", async () => {
   notify("Refreshing logs...", "info", "Logs");
   await refreshLogs();
+});
+logsCopy?.addEventListener("click", async () => {
+  await copyLogsToClipboard();
 });
 inferTarget?.addEventListener("change", () => {
   updateInferenceHint();

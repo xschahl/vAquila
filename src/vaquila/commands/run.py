@@ -29,6 +29,7 @@ from vaquila.cli_helpers import (
 )
 from vaquila.config import CONFIG
 from vaquila.docker_service import (
+    ensure_host_port_available,
     get_container,
     list_managed_containers,
     run_model_container,
@@ -225,6 +226,8 @@ def cmd_run(
                 "Manual mode on GPU requires --gpu-utilization. "
                 "Provide both --gpu-utilization and optional --cpu-utilization."
             )
+
+        ensure_host_port_available(port)
 
         auto_buffer = 2.0 if platform.system() == "Windows" else 1.5
         buffer = buffer_gb if buffer_gb is not None else auto_buffer

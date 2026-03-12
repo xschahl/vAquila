@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import socket
 
 import docker
 from docker.errors import DockerException, ImageNotFound, NotFound
@@ -136,6 +137,42 @@ def _normalize_cpu_kv_cache_space(cpu_kv_cache_space: int | None) -> str | None:
     return configured
 
 
+def ensure_host_port_available(host_port: int) -> None:
+    """Validate that a requested host port is available for a new model container."""
+    if not 1 <= host_port <= 65535:
+        raise VaquilaError("Invalid host port. Expected an integer between 1 and 65535.")
+
+    try:
+        managed_containers = list_managed_containers()
+    except VaquilaError:
+        managed_containers = []
+
+    blocking_statuses = {"created", "paused", "restarting", "running"}
+    for container in managed_containers:
+        if container.host_port != host_port:
+            continue
+        if str(container.status).lower() not in blocking_statuses:
+            continue
+
+        raise VaquilaError(
+            "Host port "
+            f"{host_port} is already used by model `{container.model_id}` "
+            f"({container.name}, status={container.status}). "
+            "Choose another port or stop the existing model with `vaq ps` then `vaq stop <model_id>`."
+        )
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("0.0.0.0", host_port))
+    except OSError as exc:
+        raise VaquilaError(
+            f"Host port {host_port} is already in use or unavailable on this machine. "
+            "Choose another port or stop the service currently using it."
+        ) from exc
+    finally:
+        probe.close()
+
+
 def run_model_container(
     model_id: str,
     host_port: int,
@@ -157,6 +194,7 @@ def run_model_container(
 ) -> Container:
     """Create and start a vLLM container for a Hugging Face model."""
     client = _docker_client()
+    ensure_host_port_available(host_port)
 
     name = _next_container_name(client, model_id)
     cache_path = _ensure_cache_dir(config.hf_cache_host_path)
