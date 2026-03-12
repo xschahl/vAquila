@@ -1670,7 +1670,9 @@ function renderInferImagePreview() {
     imageButton.appendChild(image);
     imageButton.appendChild(badge);
     imageButton.addEventListener("click", () => {
-      inferSelectedImages = inferSelectedImages.filter((_, itemIndex) => itemIndex !== index);
+      inferSelectedImages = inferSelectedImages.filter(
+        (_, itemIndex) => itemIndex !== index,
+      );
       if (inferImagesInput) {
         inferImagesInput.value = "";
       }
