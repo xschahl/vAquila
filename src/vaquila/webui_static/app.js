@@ -55,6 +55,9 @@ const logsCopy = document.getElementById("logs-copy");
 const logsClose = document.getElementById("logs-close");
 const logsRefresh = document.getElementById("logs-refresh");
 const themeToggle = document.getElementById("theme-toggle");
+const cacheCheckAllUpdatesButton = document.getElementById(
+  "cache-check-all-updates",
+);
 const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
 const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
@@ -70,8 +73,11 @@ let themeTransitionTimer = null;
 let runEstimateTimer = null;
 let runLaunchBlockedReason = "";
 let inferAbortController = null;
+let latestCacheItems = [];
+let cacheCheckAllInProgress = false;
 
 const taskStates = new Map();
+const cacheUpdateStates = new Map();
 
 function resolveInitialTheme() {
   let persisted = null;
@@ -980,6 +986,23 @@ function makeButton(label, className, onClick) {
   return button;
 }
 
+function applyCacheUpdateStatus(modelId, result, fallbackLocalRevision = null) {
+  const nextState = {
+    checking: false,
+    checked: true,
+    updateAvailable: result?.update_available === true,
+    message: String(result?.message || "Update check completed."),
+    localRevision:
+      result?.local_revision ||
+      result?.local_revision_after ||
+      fallbackLocalRevision ||
+      null,
+    remoteRevision: result?.remote_revision || null,
+  };
+  cacheUpdateStates.set(modelId, nextState);
+  return nextState;
+}
+
 function makeCell(label, value) {
   const td = document.createElement("td");
   td.dataset.label = label;
@@ -1539,8 +1562,19 @@ function renderTasks(items) {
 function renderCache(items) {
   cacheBody.innerHTML = "";
 
+  if (cacheCheckAllUpdatesButton) {
+    cacheCheckAllUpdatesButton.disabled = cacheCheckAllInProgress;
+    cacheCheckAllUpdatesButton.setAttribute(
+      "aria-disabled",
+      String(cacheCheckAllInProgress),
+    );
+    cacheCheckAllUpdatesButton.textContent = cacheCheckAllInProgress
+      ? "Checking all..."
+      : "Check all updates";
+  }
+
   if (!Array.isArray(items) || items.length === 0) {
-    cacheBody.appendChild(createEmptyRow("No cached model found.", 4));
+    cacheBody.appendChild(createEmptyRow("No cached model found.", 5));
     return;
   }
 
@@ -1551,6 +1585,148 @@ function renderCache(items) {
       makeCell("Size (GiB)", Number(item.size_gib || 0).toFixed(2)),
     );
     tr.appendChild(makeCell("Path", item.path));
+
+    const updateState = cacheUpdateStates.get(item.model_id) || {
+      checking: false,
+      checked: false,
+      updateAvailable: false,
+      message: "Update status not checked.",
+      localRevision: item.local_revision || null,
+      remoteRevision: null,
+    };
+
+    const updateTd = document.createElement("td");
+    updateTd.dataset.label = "Update";
+    const updateRow = document.createElement("div");
+    updateRow.className = "action-row";
+
+    const localShort = updateState.localRevision
+      ? String(updateState.localRevision).slice(0, 8)
+      : "-";
+    const remoteShort = updateState.remoteRevision
+      ? String(updateState.remoteRevision).slice(0, 8)
+      : "-";
+
+    const statusText = updateState.checked
+      ? updateState.updateAvailable
+        ? `New revision available (${localShort} → ${remoteShort}).`
+        : `Up to date (${localShort}).`
+      : `Not checked yet (${localShort}).`;
+
+    const statusChip = document.createElement("span");
+    statusChip.className = `status-chip ${
+      updateState.updateAvailable
+        ? "status-queued"
+        : updateState.checked
+          ? "status-running"
+          : ""
+    }`;
+    statusChip.textContent = statusText;
+    updateRow.appendChild(statusChip);
+
+    const checkButton = makeButton(
+      updateState.checking ? "Checking..." : "Check update",
+      "small-ghost",
+      async () => {
+        cacheUpdateStates.set(item.model_id, {
+          ...updateState,
+          checking: true,
+        });
+        renderCache(latestCacheItems);
+
+        try {
+          const result = await api(
+            `/api/cache/${encodeURIComponent(item.model_id)}/check-update`,
+            {
+              method: "POST",
+            },
+          );
+          const nextState = applyCacheUpdateStatus(
+            item.model_id,
+            result,
+            item.local_revision || null,
+          );
+          cacheUpdateStates.set(item.model_id, nextState);
+
+          if (nextState.updateAvailable) {
+            notify(
+              `New revision available for ${item.model_id}.`,
+              "warning",
+              "Cache update available",
+            );
+            setStatus(`Update available for ${item.model_id}.`, "ok");
+          } else {
+            notify(
+              `${item.model_id} is already up to date.`,
+              "success",
+              "Cache is up to date",
+            );
+            setStatus(`${item.model_id} is up to date.`, "ok");
+          }
+        } catch (error) {
+          cacheUpdateStates.set(item.model_id, {
+            ...updateState,
+            checking: false,
+            checked: true,
+            updateAvailable: false,
+            message: String(error.message || "Update check failed."),
+          });
+          notify(
+            `Update check failed: ${error.message}`,
+            "error",
+            "Update check failed",
+            6500,
+          );
+          setStatus(`Update check failed: ${error.message}`, "error");
+        }
+
+        await refreshAll();
+      },
+    );
+    checkButton.disabled = updateState.checking;
+    checkButton.setAttribute("aria-disabled", String(updateState.checking));
+    updateRow.appendChild(checkButton);
+
+    if (updateState.updateAvailable) {
+      const updateButton = makeButton("Update", "small-button", async () => {
+        try {
+          notify(
+            `Updating cache for ${item.model_id}...`,
+            "info",
+            "Cache update started",
+          );
+          setStatus(`Updating cache for ${item.model_id}...`, "ok");
+
+          const result = await api(
+            `/api/cache/${encodeURIComponent(item.model_id)}/update`,
+            {
+              method: "POST",
+            },
+          );
+          applyCacheUpdateStatus(item.model_id, result, item.local_revision || null);
+
+          notify(
+            `${item.model_id} cache updated successfully.`,
+            "success",
+            "Cache updated",
+          );
+          setStatus(`${item.model_id} cache updated successfully.`, "ok");
+          await refreshAll();
+        } catch (error) {
+          notify(
+            `Cache update failed: ${error.message}`,
+            "error",
+            "Cache update failed",
+            6500,
+          );
+          setStatus(`Cache update failed: ${error.message}`, "error");
+        }
+      });
+      updateRow.appendChild(updateButton);
+    }
+
+    updateTd.appendChild(updateRow);
+    tr.appendChild(updateTd);
 
     const actionTd = document.createElement("td");
     actionTd.dataset.label = "Action";
@@ -1590,6 +1766,71 @@ function renderCache(items) {
   });
 }
 
+async function checkAllCacheUpdates() {
+  if (cacheCheckAllInProgress) {
+    return;
+  }
+
+  if (!Array.isArray(latestCacheItems) || latestCacheItems.length === 0) {
+    notify("No cached model found.", "warning", "Cache updates");
+    setStatus("No cached model found.", "error");
+    return;
+  }
+
+  cacheCheckAllInProgress = true;
+  renderCache(latestCacheItems);
+
+  try {
+    setStatus("Checking updates for all cached models...", "ok");
+    const result = await api("/api/cache/check-updates", { method: "POST" });
+    const items = Array.isArray(result?.items) ? result.items : [];
+
+    const localByModelId = new Map(
+      latestCacheItems.map((item) => [item.model_id, item.local_revision || null]),
+    );
+
+    let updateAvailableCount = 0;
+    items.forEach((entry) => {
+      const modelId = String(entry?.model_id || "");
+      if (!modelId) {
+        return;
+      }
+      const state = applyCacheUpdateStatus(
+        modelId,
+        entry,
+        localByModelId.get(modelId) || null,
+      );
+      if (state.updateAvailable) {
+        updateAvailableCount += 1;
+      }
+    });
+
+    const checkedCount = items.length;
+    const upToDateCount = Math.max(0, checkedCount - updateAvailableCount);
+    notify(
+      `Checked ${checkedCount} model(s): ${updateAvailableCount} update(s) available, ${upToDateCount} up to date.`,
+      updateAvailableCount > 0 ? "warning" : "success",
+      "Cache updates checked",
+      5200,
+    );
+    setStatus(
+      `Cache updates checked: ${updateAvailableCount} update(s) available.`,
+      "ok",
+    );
+  } catch (error) {
+    notify(
+      `Check all updates failed: ${error.message}`,
+      "error",
+      "Cache updates failed",
+      6500,
+    );
+    setStatus(`Check all updates failed: ${error.message}`, "error");
+  } finally {
+    cacheCheckAllInProgress = false;
+    renderCache(latestCacheItems);
+  }
+}
+
 async function refreshAll(options = {}) {
   const { notifyOnFailure = false } = options;
   try {
@@ -1605,6 +1846,7 @@ async function refreshAll(options = {}) {
     const containerItems = containers.items || [];
     const taskItems = tasks.items || [];
     const cacheItems = cache.items || [];
+    latestCacheItems = cacheItems;
     const gpuItems = gpu.items || [];
     const systemMetrics = system || {};
 
@@ -1951,6 +2193,9 @@ logsRefresh.addEventListener("click", async () => {
 });
 logsCopy?.addEventListener("click", async () => {
   await copyLogsToClipboard();
+});
+cacheCheckAllUpdatesButton?.addEventListener("click", async () => {
+  await checkAllCacheUpdates();
 });
 inferTarget?.addEventListener("change", () => {
   updateInferenceHint();

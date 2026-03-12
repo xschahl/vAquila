@@ -26,12 +26,15 @@ from vaquila.cli_helpers import (
     dir_size_bytes,
     estimate_max_num_seqs_from_model_profile,
     estimate_required_ratio,
+    get_model_update_status,
     hub_cache_root,
     list_cached_model_dirs,
     model_cache_repo_dir,
     purge_model_cache,
+    read_cached_model_revision,
     resolve_kv_cache_dtype,
     resolve_quantization_strategy,
+    update_model_cache,
 )
 from vaquila.commands import run as run_command_module
 from vaquila.commands.run import cmd_run
@@ -311,6 +314,26 @@ def _remove_model_cache_or_raise(model_id: str) -> bool:
         )
 
     return purge_model_cache(model_id)
+
+
+def _assert_model_not_running(model_id: str) -> None:
+    """Ensure one model is not currently running before cache maintenance operations."""
+    try:
+        managed_containers = list_managed_containers()
+    except VaquilaError:
+        managed_containers = []
+
+    running_for_model = [
+        container
+        for container in managed_containers
+        if container.model_id == model_id and container.status == "running"
+    ]
+    if running_for_model:
+        names = ", ".join(container.name for container in running_for_model)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model `{model_id}` is still running ({names}). Stop it first.",
+        )
 
 
 def create_web_app() -> FastAPI:
@@ -766,16 +789,76 @@ def create_web_app() -> FastAPI:
         """Return cached Hugging Face models with local sizes."""
         items = []
         for model_dir in list_cached_model_dirs():
+            model_id = cache_dir_to_model_id(model_dir)
             size_bytes = dir_size_bytes(model_dir)
             items.append(
                 {
-                    "model_id": cache_dir_to_model_id(model_dir),
+                    "model_id": model_id,
                     "size_bytes": size_bytes,
                     "size_gib": size_bytes / (1024**3),
                     "path": str(model_dir),
+                    "local_revision": read_cached_model_revision(model_id),
                 }
             )
         return {"items": items}
+
+    @app.post("/api/cache/{model_id:path}/check-update")
+    def check_cache_update(model_id: str) -> dict[str, object]:
+        """Check whether a newer Hugging Face revision is available."""
+        status = get_model_update_status(model_id)
+        return {
+            **status,
+            "checked": True,
+            "checked_at": _utc_now(),
+        }
+
+    @app.post("/api/cache/check-updates")
+    def check_all_cache_updates() -> dict[str, object]:
+        """Check update availability for all cached Hugging Face models."""
+        items: list[dict[str, object]] = []
+        for model_dir in list_cached_model_dirs():
+            model_id = cache_dir_to_model_id(model_dir)
+            status = get_model_update_status(model_id)
+            items.append(
+                {
+                    **status,
+                    "checked": True,
+                    "checked_at": _utc_now(),
+                }
+            )
+
+        return {"items": items}
+
+    @app.post("/api/cache/{model_id:path}/update")
+    def update_cache(model_id: str) -> dict[str, object]:
+        """Update one cached model to the latest Hub revision when available."""
+        _assert_model_not_running(model_id)
+
+        status = get_model_update_status(model_id)
+        if status.get("update_available") is not True:
+            return {
+                "model_id": model_id,
+                "updated": False,
+                "message": status.get("message") or "Cache is already up to date.",
+                "local_revision_before": status.get("local_revision"),
+                "local_revision_after": status.get("local_revision"),
+                "remote_revision": status.get("remote_revision"),
+            }
+
+        try:
+            result = update_model_cache(model_id)
+        except VaquilaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        refreshed_status = get_model_update_status(model_id)
+        return {
+            **result,
+            "message": "Cache update completed.",
+            "update_available": refreshed_status.get("update_available", False),
+            "local_revision": refreshed_status.get("local_revision"),
+            "remote_revision": refreshed_status.get("remote_revision"),
+            "checked_at": _utc_now(),
+        }
 
     @app.delete("/api/cache/{model_id:path}")
     def delete_cache(model_id: str) -> dict[str, object]:
