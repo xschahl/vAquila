@@ -94,6 +94,11 @@ def run(
         "--allow-long-context-override/--no-allow-long-context-override",
         help="Allow context length above model limit (risky). If omitted: interactive prompt when needed.",
     ),
+    trust_remote_code: bool = typer.Option(
+        False,
+        "--trust-remote-code/--no-trust-remote-code",
+        help="Allow custom model code from the Hugging Face repository (advanced, security-sensitive).",
+    ),
     quantization: str = typer.Option(
         "auto",
         "--quantization",
@@ -122,6 +127,7 @@ def run(
         reasoning_parser=reasoning_parser,
         enable_thinking=enable_thinking,
         allow_long_context_override=allow_long_context_override,
+        trust_remote_code=trust_remote_code,
         quantization=quantization,
         kv_cache_dtype=kv_cache_dtype,
     )

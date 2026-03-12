@@ -48,6 +48,7 @@ Open `http://localhost:8787`, then use the **Run model** panel.
 - `Reasoning parser`: optional parser for reasoning models.
 - `Enable thinking`: enables or disables thinking mode.
 - `Allow long context override`: advanced override when requested context exceeds the model limit.
+- `Trust remote code`: allows custom model code from the Hugging Face repository. Leave it disabled unless you trust the model source.
 
 ## Validation and estimate card
 
@@ -63,6 +64,7 @@ This makes the Web UI the easiest way to test different runtime settings before 
 
 - Start with `Model ID`, `Device`, `Port`, `Max num seqs`, and `Max model len`.
 - Leave quantization and KV cache dtype on `auto` unless you have a specific reason to override them.
+- Enable `Trust remote code` only for repositories you explicitly trust.
 - Use manual utilization ratios only when you want strict control over resource allocation.
 - Watch the estimate card before clicking **Launch model**.
 - After launch, follow the task logs to monitor Docker image pulls, Hugging Face downloads, and vLLM startup.

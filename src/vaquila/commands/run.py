@@ -202,6 +202,7 @@ def cmd_run(
     reasoning_parser: str | None,
     enable_thinking: bool | None,
     allow_long_context_override: bool | None,
+    trust_remote_code: bool,
     quantization: str,
     kv_cache_dtype: str | None,
     device: str = "gpu",
@@ -284,7 +285,7 @@ def cmd_run(
                 f"max_num_seqs={resolved_max_num_seqs}, max_model_len={resolved_max_model_len}, "
                 f"tool_call_parser={resolved_tool_call_parser or 'none'}, "
                 f"reasoning_parser={resolved_reasoning_parser or 'none'}, "
-                f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
+                f"enable_thinking={resolved_enable_thinking}, trust_remote_code={trust_remote_code}, quantization={quantization_label}, "
                 f"kv_cache_dtype={resolved_kv_cache_dtype}, backend=cpu"
             )
             console.print(
@@ -320,6 +321,7 @@ def cmd_run(
                     enable_thinking=resolved_enable_thinking,
                     required_ratio=None,
                     allow_long_context_override=resolved_allow_long_context_override,
+                    trust_remote_code=trust_remote_code,
                     quantization=resolved_quantization,
                     kv_cache_dtype=resolved_kv_cache_dtype,
                     config=CONFIG,
@@ -364,7 +366,7 @@ def cmd_run(
                 f"max_num_seqs={resolved_max_num_seqs}, max_model_len={resolved_max_model_len}, "
                 f"tool_call_parser={resolved_tool_call_parser or 'none'}, "
                 f"reasoning_parser={resolved_reasoning_parser or 'none'}, "
-                f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
+                f"enable_thinking={resolved_enable_thinking}, trust_remote_code={trust_remote_code}, quantization={quantization_label}, "
                 f"kv_cache_dtype={resolved_kv_cache_dtype}, gpu_utilization={selected_ratio:.3f}, "
                 f"cpu_utilization={cpu_utilization if cpu_utilization is not None else 'none'}"
             )
@@ -390,6 +392,7 @@ def cmd_run(
                     enable_thinking=resolved_enable_thinking,
                     required_ratio=None,
                     allow_long_context_override=resolved_allow_long_context_override,
+                    trust_remote_code=trust_remote_code,
                     quantization=resolved_quantization,
                     kv_cache_dtype=resolved_kv_cache_dtype,
                     config=CONFIG,
@@ -547,7 +550,7 @@ def cmd_run(
             f"max_num_seqs={resolved_max_num_seqs}, max_model_len={resolved_max_model_len}, "
             f"tool_call_parser={resolved_tool_call_parser or 'none'}, "
             f"reasoning_parser={resolved_reasoning_parser or 'none'}, "
-            f"enable_thinking={resolved_enable_thinking}, quantization={quantization_label}, "
+            f"enable_thinking={resolved_enable_thinking}, trust_remote_code={trust_remote_code}, quantization={quantization_label}, "
             f"kv_cache_dtype={resolved_kv_cache_dtype}, required_ratio~{new_required_ratio:.3f}"
         )
         console.print(
@@ -601,6 +604,7 @@ def cmd_run(
                     enable_thinking=resolved_enable_thinking,
                     required_ratio=new_required_ratio,
                     allow_long_context_override=resolved_allow_long_context_override,
+                    trust_remote_code=trust_remote_code,
                     quantization=resolved_quantization,
                     kv_cache_dtype=resolved_kv_cache_dtype,
                     config=CONFIG,
@@ -760,6 +764,7 @@ def cmd_run(
                         enable_thinking=resolved_enable_thinking,
                         required_ratio=new_required_ratio,
                         allow_long_context_override=resolved_allow_long_context_override,
+                        trust_remote_code=trust_remote_code,
                         quantization=resolved_quantization,
                         kv_cache_dtype=resolved_kv_cache_dtype,
                         config=CONFIG,
@@ -798,6 +803,7 @@ def cmd_run(
                             enable_thinking=resolved_enable_thinking,
                             required_ratio=new_required_ratio,
                             allow_long_context_override=resolved_allow_long_context_override,
+                            trust_remote_code=trust_remote_code,
                             quantization=resolved_quantization,
                             kv_cache_dtype=resolved_kv_cache_dtype,
                             config=CONFIG,
@@ -851,6 +857,7 @@ def cmd_run(
                         enable_thinking=resolved_enable_thinking,
                         required_ratio=new_required_ratio,
                         allow_long_context_override=resolved_allow_long_context_override,
+                        trust_remote_code=trust_remote_code,
                         quantization=resolved_quantization,
                         kv_cache_dtype=resolved_kv_cache_dtype,
                         config=CONFIG,

@@ -271,6 +271,7 @@ def run_model_container(
     required_ratio: float | None,
     allow_long_context_override: bool,
     config: RuntimeConfig,
+    trust_remote_code: bool = False,
     quantization: str | None = None,
     kv_cache_dtype: str | None = None,
     compute_backend: str = "gpu",
@@ -311,6 +312,8 @@ def run_model_container(
             command.extend(["--quantization", quantization])
         if kv_cache_dtype:
             command.extend(["--kv-cache-dtype", kv_cache_dtype])
+        if trust_remote_code:
+            command.append("--trust-remote-code")
 
         environment: dict[str, str] = {}
         if backend == "gpu" and gpu_index is not None:
@@ -343,6 +346,7 @@ def run_model_container(
             "com.vaquila.enable_thinking": "true" if enable_thinking else "false",
             "com.vaquila.required_ratio": "" if required_ratio is None else f"{required_ratio:.3f}",
             "com.vaquila.allow_long_context_override": "true" if allow_long_context_override else "false",
+            "com.vaquila.trust_remote_code": "true" if trust_remote_code else "false",
             "com.vaquila.quantization": quantization or "",
             "com.vaquila.kv_cache_dtype": kv_cache_dtype or "",
         }
@@ -412,6 +416,7 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
         enable_thinking: bool | None = None
         required_ratio: float | None = None
         allow_long_context_override: bool | None = None
+        trust_remote_code: bool | None = None
         if gpu_idx_value is not None:
             try:
                 gpu_index = int(gpu_idx_value)
@@ -473,6 +478,10 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
         if allow_long_context_override_value is not None:
             allow_long_context_override = allow_long_context_override_value.lower() == "true"
 
+        trust_remote_code_value = labels.get("com.vaquila.trust_remote_code")
+        if trust_remote_code_value is not None:
+            trust_remote_code = trust_remote_code_value.lower() == "true"
+
         if gpu_index is not None and snapshot_by_gpu and gpu_index in snapshot_by_gpu:
             snapshot = snapshot_by_gpu[gpu_index]
             if container.status == "running":
@@ -508,6 +517,7 @@ def list_managed_containers(snapshot_by_gpu: dict[int, GpuSnapshot] | None = Non
                 enable_thinking=enable_thinking,
                 required_ratio=required_ratio,
                 allow_long_context_override=allow_long_context_override,
+                trust_remote_code=trust_remote_code,
                 instance_id=instance_id,
             )
         )

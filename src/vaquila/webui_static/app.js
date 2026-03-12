@@ -11,6 +11,11 @@ const inferOutput = document.getElementById("infer-output");
 const inferMetrics = document.getElementById("infer-metrics");
 const inferTarget = document.getElementById("infer-target");
 const inferEndpointHint = document.getElementById("infer-endpoint-hint");
+const inferImagesInput = document.getElementById("infer-images");
+const inferImagesPreview = document.getElementById("infer-images-preview");
+const inferImagesList = document.getElementById("infer-images-list");
+const inferSubmitButton = document.getElementById("infer-submit-button");
+const inferStopButton = document.getElementById("infer-stop-button");
 
 const tasksBody = document.getElementById("tasks-body");
 const containersBody = document.getElementById("containers-body");
@@ -62,6 +67,7 @@ let tasksSnapshotReady = false;
 let themeTransitionTimer = null;
 let runEstimateTimer = null;
 let runLaunchBlockedReason = "";
+let inferAbortController = null;
 
 const taskStates = new Map();
 
@@ -1612,13 +1618,113 @@ runForm.addEventListener("change", () => {
   scheduleRunEstimate();
 });
 
-runForm.addEventListener("change", () => {
-  syncRunDeviceFields();
-  scheduleRunEstimate();
+// Handle image file input for inference
+let inferSelectedImages = [];
+
+function setInferenceRunning(isRunning) {
+  if (inferSubmitButton) {
+    inferSubmitButton.disabled = isRunning;
+    inferSubmitButton.setAttribute("aria-disabled", String(isRunning));
+  }
+
+  if (inferStopButton) {
+    inferStopButton.disabled = !isRunning;
+    inferStopButton.setAttribute("aria-disabled", String(!isRunning));
+  }
+}
+
+async function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(reader.result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderInferImagePreview() {
+  if (!inferImagesList || !inferImagesPreview) {
+    return;
+  }
+
+  inferImagesList.innerHTML = "";
+  inferImagesPreview.hidden = inferSelectedImages.length === 0;
+
+  inferSelectedImages.forEach((imageUrl, index) => {
+    const imageButton = document.createElement("button");
+    imageButton.type = "button";
+    imageButton.className = "infer-image-chip";
+    imageButton.title = `Remove image ${index + 1}`;
+    imageButton.setAttribute("aria-label", `Remove image ${index + 1}`);
+
+    const image = document.createElement("img");
+    image.src = imageUrl;
+    image.alt = `Selected image ${index + 1}`;
+
+    const badge = document.createElement("span");
+    badge.className = "infer-image-chip-badge";
+    badge.textContent = "Remove";
+
+    imageButton.appendChild(image);
+    imageButton.appendChild(badge);
+    imageButton.addEventListener("click", () => {
+      inferSelectedImages = inferSelectedImages.filter((_, itemIndex) => itemIndex !== index);
+      if (inferImagesInput) {
+        inferImagesInput.value = "";
+      }
+      renderInferImagePreview();
+    });
+
+    inferImagesList.appendChild(imageButton);
+  });
+}
+
+async function handleInferImageSelection(event) {
+  const files = Array.from(event.target.files || []);
+  inferSelectedImages = [];
+
+  for (const file of files) {
+    try {
+      const base64 = await fileToBase64(file);
+      inferSelectedImages.push(base64);
+    } catch (error) {
+      notify(
+        `Failed to read image ${file.name}: ${error.message}`,
+        "error",
+        "Image read error",
+      );
+    }
+  }
+
+  renderInferImagePreview();
+}
+
+if (inferImagesInput) {
+  inferImagesInput.addEventListener("change", handleInferImageSelection);
+}
+
+inferStopButton?.addEventListener("click", () => {
+  if (!inferAbortController) {
+    return;
+  }
+
+  inferAbortController.abort();
+  setStatus("Inference stopped by user.", "error");
+  notify("Inference stream stopped.", "info", "Inference stopped", 3200);
 });
 
 inferForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+
+  if (inferAbortController) {
+    inferAbortController.abort();
+  }
+
+  inferAbortController = new AbortController();
+  setInferenceRunning(true);
+
   try {
     const payload = getFormPayload(inferForm);
     const selectedOption = inferTarget?.selectedOptions?.[0];
@@ -1632,6 +1738,7 @@ inferForm.addEventListener("submit", async (event) => {
 
     payload.model_id = selectedOption.dataset.modelId;
     payload.base_url = selectedOption.dataset.baseUrl;
+    payload.images = inferSelectedImages;
 
     inferOutput.textContent = "";
     inferMetrics.textContent = "Streaming response...";
@@ -1645,6 +1752,7 @@ inferForm.addEventListener("submit", async (event) => {
     const response = await fetch("/api/infer/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: inferAbortController.signal,
       body: JSON.stringify(payload),
     });
 
@@ -1748,6 +1856,14 @@ inferForm.addEventListener("submit", async (event) => {
     );
     setStatus(`Inference completed for ${payload.model_id}.`, "ok");
   } catch (error) {
+    if (error?.name === "AbortError") {
+      inferMetrics.textContent = "Inference stopped by user.";
+      if (!inferOutput.textContent.trim()) {
+        inferOutput.textContent = "Inference stopped.";
+      }
+      return;
+    }
+
     inferOutput.textContent = "Inference failed.";
     inferMetrics.textContent = "No metrics available.";
     notify(
@@ -1757,6 +1873,9 @@ inferForm.addEventListener("submit", async (event) => {
       6500,
     );
     setStatus(`Inference failed: ${error.message}`, "error");
+  } finally {
+    inferAbortController = null;
+    setInferenceRunning(false);
   }
 });
 
