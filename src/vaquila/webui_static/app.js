@@ -32,6 +32,8 @@ const cpuModelRamStack = document.getElementById("cpu-model-ram-stack");
 const cpuModelList = document.getElementById("cpu-model-list");
 
 const runDevice = document.getElementById("run-device");
+const runModelIdInput = document.getElementById("run-model-id");
+const hfModelSuggestions = document.getElementById("hf-model-suggestions");
 const runGpuField = document.getElementById("run-gpu-field");
 const runBufferField = document.getElementById("run-buffer-field");
 const runGpuUtilField = document.getElementById("run-gpu-utilization-field");
@@ -75,6 +77,8 @@ let runLaunchBlockedReason = "";
 let inferAbortController = null;
 let latestCacheItems = [];
 let cacheCheckAllInProgress = false;
+let modelSuggestTimer = null;
+let modelSuggestAbortController = null;
 
 const taskStates = new Map();
 const cacheUpdateStates = new Map();
@@ -199,6 +203,87 @@ function setStatus(message, type = "info") {
   toast.classList.remove("is-ok", "is-error");
   if (type === "ok") toast.classList.add("is-ok");
   if (type === "error") toast.classList.add("is-error");
+}
+
+function renderModelSuggestions(items) {
+  if (!hfModelSuggestions) {
+    return;
+  }
+
+  hfModelSuggestions.innerHTML = "";
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const modelId = String(item?.model_id || "").trim();
+    if (!modelId) {
+      return;
+    }
+
+    const option = document.createElement("option");
+    option.value = modelId;
+
+    const downloads = Number(item?.downloads);
+    const likes = Number(item?.likes);
+    const details = [];
+    if (!Number.isNaN(downloads) && downloads >= 0) {
+      details.push(`${downloads.toLocaleString()} downloads`);
+    }
+    if (!Number.isNaN(likes) && likes >= 0) {
+      details.push(`${likes.toLocaleString()} likes`);
+    }
+    if (details.length > 0) {
+      option.label = `${modelId} (${details.join(" • ")})`;
+    }
+
+    hfModelSuggestions.appendChild(option);
+  });
+}
+
+async function fetchModelSuggestions(rawQuery) {
+  const query = String(rawQuery || "").trim();
+
+  if (!hfModelSuggestions) {
+    return;
+  }
+
+  if (query.length < 2) {
+    renderModelSuggestions([]);
+    return;
+  }
+
+  if (modelSuggestAbortController) {
+    modelSuggestAbortController.abort();
+  }
+
+  modelSuggestAbortController = new AbortController();
+  try {
+    const response = await fetch(
+      `/api/hf/models?q=${encodeURIComponent(query)}&limit=12`,
+      {
+        signal: modelSuggestAbortController.signal,
+      },
+    );
+    if (!response.ok) {
+      renderModelSuggestions([]);
+      return;
+    }
+
+    const payload = await response.json();
+    renderModelSuggestions(payload?.items || []);
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      renderModelSuggestions([]);
+    }
+  }
+}
+
+function scheduleModelSuggestions(query) {
+  if (modelSuggestTimer !== null) {
+    window.clearTimeout(modelSuggestTimer);
+  }
+
+  modelSuggestTimer = window.setTimeout(() => {
+    modelSuggestTimer = null;
+    fetchModelSuggestions(query);
+  }, 220);
 }
 
 function notify(
@@ -1703,7 +1788,11 @@ function renderCache(items) {
               method: "POST",
             },
           );
-          applyCacheUpdateStatus(item.model_id, result, item.local_revision || null);
+          applyCacheUpdateStatus(
+            item.model_id,
+            result,
+            item.local_revision || null,
+          );
 
           notify(
             `${item.model_id} cache updated successfully.`,
@@ -1786,7 +1875,10 @@ async function checkAllCacheUpdates() {
     const items = Array.isArray(result?.items) ? result.items : [];
 
     const localByModelId = new Map(
-      latestCacheItems.map((item) => [item.model_id, item.local_revision || null]),
+      latestCacheItems.map((item) => [
+        item.model_id,
+        item.local_revision || null,
+      ]),
     );
 
     let updateAvailableCount = 0;
@@ -1910,6 +2002,17 @@ runForm.addEventListener("submit", async (event) => {
   } catch (error) {
     notify(`Run failed: ${error.message}`, "error", "Launch failed", 6500);
     setStatus(`Run failed: ${error.message}`, "error");
+  }
+});
+
+runModelIdInput?.addEventListener("input", (event) => {
+  scheduleModelSuggestions(event.target?.value || "");
+});
+
+runModelIdInput?.addEventListener("focus", (event) => {
+  const value = String(event.target?.value || "").trim();
+  if (value.length >= 2) {
+    scheduleModelSuggestions(value);
   }
 });
 

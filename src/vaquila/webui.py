@@ -624,6 +624,49 @@ def create_web_app() -> FastAPI:
         """Return application health status."""
         return {"status": "ok"}
 
+    @app.get("/api/hf/models")
+    def search_hf_models(q: str, limit: int = 10) -> dict[str, object]:
+        """Search Hugging Face model IDs for autocomplete suggestions."""
+        query = q.strip()
+        if len(query) < 2:
+            return {"items": [], "query": query}
+
+        bounded_limit = max(1, min(limit, 20))
+
+        try:
+            from huggingface_hub import HfApi
+        except ImportError as exc:  # pragma: no cover
+            raise HTTPException(
+                status_code=500,
+                detail="huggingface_hub dependency is missing.",
+            ) from exc
+
+        try:
+            api = HfApi()
+            matches = api.list_models(search=query, limit=bounded_limit)
+        except Exception:
+            return {
+                "items": [],
+                "query": query,
+                "error": "Unable to fetch Hugging Face suggestions.",
+            }
+
+        items: list[dict[str, object]] = []
+        for model in matches:
+            model_id = getattr(model, "id", None)
+            if not isinstance(model_id, str) or not model_id.strip():
+                continue
+
+            items.append(
+                {
+                    "model_id": model_id,
+                    "downloads": getattr(model, "downloads", None),
+                    "likes": getattr(model, "likes", None),
+                }
+            )
+
+        return {"items": items, "query": query}
+
     @app.get("/api/containers")
     def containers() -> dict[str, list[dict[str, object]]]:
         """Return active and stopped vAquila containers."""
