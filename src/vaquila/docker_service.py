@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import socket
+from typing import Callable
 
 import docker
 from docker.errors import DockerException, ImageNotFound, NotFound
@@ -69,10 +70,93 @@ def check_docker_connection() -> None:
     _docker_client()
 
 
-def _ensure_image_available(client: docker.DockerClient, image: str) -> None:
+def _render_progress_bar(current: int, total: int, width: int = 24) -> str:
+    """Render a deterministic ASCII progress bar for log streaming."""
+    if total <= 0:
+        return "[" + ("-" * width) + "]"
+
+    ratio = max(0.0, min(1.0, current / total))
+    filled = int(round(ratio * width))
+    filled = max(0, min(width, filled))
+    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
+
+
+def _stream_image_pull_progress(
+    client: docker.DockerClient,
+    image: str,
+    progress_callback: Callable[[str], None] | None,
+) -> None:
+    """Pull one image while emitting compact progress updates when possible."""
+    low_level_client = client.api
+    layer_progress: dict[str, tuple[int, int]] = {}
+    last_reported_percent = -1
+    emitted_any_progress = False
+
+    if progress_callback is not None:
+        progress_callback(f"[docker] Pulling image: {image}")
+
+    for event in low_level_client.pull(image, stream=True, decode=True):
+        if not isinstance(event, dict):
+            continue
+
+        if "error" in event:
+            error_message = str(event.get("error") or "Unknown Docker pull error")
+            raise VaquilaError(
+                f"Unable to pull Docker image `{image}`. Docker reported: {error_message}"
+            )
+
+        if progress_callback is None:
+            continue
+
+        status_text = str(event.get("status") or "").strip().lower()
+        layer_id = str(event.get("id") or "layer")
+        progress_detail = event.get("progressDetail")
+
+        if isinstance(progress_detail, dict):
+            current = int(progress_detail.get("current") or 0)
+            total = int(progress_detail.get("total") or 0)
+            if total > 0 and current >= 0:
+                bounded_current = min(current, total)
+                layer_progress[layer_id] = (bounded_current, total)
+
+                total_current = sum(progress[0] for progress in layer_progress.values())
+                total_total = sum(progress[1] for progress in layer_progress.values())
+                if total_total > 0:
+                    percent = int((total_current / total_total) * 100)
+                    should_report = (
+                        percent >= 100
+                        or last_reported_percent < 0
+                        or (percent - last_reported_percent) >= 5
+                    )
+                    if should_report:
+                        bar = _render_progress_bar(current=total_current, total=total_total)
+                        progress_callback(f"[docker] Pull progress {bar} {percent}%")
+                        last_reported_percent = percent
+                        emitted_any_progress = True
+                continue
+
+        if status_text in {"download complete", "pull complete"}:
+            continue
+
+    if progress_callback is not None:
+        if emitted_any_progress:
+            if last_reported_percent < 100:
+                progress_callback("[docker] Pull progress [########################] 100%")
+            progress_callback(f"[docker] Image ready: {image}")
+        else:
+            progress_callback(f"[docker] Pull completed: {image}")
+
+
+def _ensure_image_available(
+    client: docker.DockerClient,
+    image: str,
+    progress_callback: Callable[[str], None] | None = None,
+) -> None:
     """Ensure a Docker image exists locally, pulling it when missing."""
     try:
         client.images.get(image)
+        if progress_callback is not None:
+            progress_callback(f"[docker] Image already available locally: {image}")
         return
     except ImageNotFound:
         pass
@@ -80,7 +164,7 @@ def _ensure_image_available(client: docker.DockerClient, image: str) -> None:
         raise VaquilaError(f"Unable to inspect Docker image `{image}`: {exc}") from exc
 
     try:
-        client.images.pull(image)
+        _stream_image_pull_progress(client, image=image, progress_callback=progress_callback)
     except DockerException as exc:
         raise VaquilaError(
             f"Unable to pull Docker image `{image}`. Check network access and image name/tag."
@@ -191,6 +275,7 @@ def run_model_container(
     kv_cache_dtype: str | None = None,
     compute_backend: str = "gpu",
     cpu_kv_cache_space: int | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> Container:
     """Create and start a vLLM container for a Hugging Face model."""
     client = _docker_client()
@@ -269,7 +354,7 @@ def run_model_container(
             normalized_gpu_image = config.image.strip().lower()
             if normalized_cpu_image == normalized_gpu_image and "cpu" not in normalized_cpu_image:
                 selected_image = "vllm/vllm-openai-cpu:latest"
-        _ensure_image_available(client, selected_image)
+        _ensure_image_available(client, selected_image, progress_callback=progress_callback)
 
         nano_cpus: int | None = None
         if cpu_utilization is not None:
