@@ -2,72 +2,58 @@
 title: Getting Started
 ---
 
-## Prerequisites
+Choose the startup path that matches your machine and your target workflow.
+
+## Choose a path
+
+- [Classic setup with GPU support](./getting-started-gpu)
+- [CPU-only setup without GPU](./getting-started-cpu-only)
+  Both variants use the published image `ghcr.io/xschahl/vaquila:latest` and cover:
+
+- simple `docker run`
+- Dockerfile-based wrapper images
+- Docker Compose
+- CLI usage
+- Web UI usage
+
+## Shared prerequisites
 
 - Docker Desktop or Docker Engine
-- NVIDIA stack for GPU mode
-- Python is not required when using Docker-first workflows
+- Python is not required for Docker-first workflows
+- A host path for the Hugging Face cache that Docker can read
 
-## Configure
-
-Copy `.env.example` to `.env` and set:
+Set at least:
 
 ```bash
 VAQ_HF_CACHE_HOST_PATH=/absolute/path/to/huggingface/cache
 ```
 
-Optional images:
+For CPU-only workflows, also set:
 
 ```bash
-VAQ_VLLM_IMAGE=vllm/vllm-openai:latest
-VAQ_VLLM_CPU_IMAGE=vllm/vllm-openai-cpu:latest-x86_64
+VAQ_VLLM_CPU_IMAGE=vllm/vllm-openai-cpu:latest
 ```
 
-## Build
+On Windows with Docker Desktop, prefer a path that the Docker daemon can read correctly.
+
+## Quick check
 
 ```bash
-docker compose build vaq
+docker pull ghcr.io/xschahl/vaquila:latest
+docker run --rm ghcr.io/xschahl/vaquila:latest --help
 ```
 
-## Use prebuilt GHCR image
+## Examples
 
-If you do not want to build locally, use the published image:
-
-```bash
-docker pull ghcr.io/xschahl/vaquila:v0.1.0-beta.1
-docker run --rm ghcr.io/xschahl/vaquila:v0.1.0-beta.1 --help
-```
-
-You can also use it as a base image in your own Dockerfile:
-
-```dockerfile
-FROM ghcr.io/xschahl/vaquila:v0.1.0-beta.1
-```
-
-Functional example files are available in `docs/examples/ghcr/`:
+Functional examples are available in `docs/examples/`:
 
 - `docs/examples/ghcr/docker-compose.yml`
 - `docs/examples/ghcr/Dockerfile`
 - `docs/examples/ghcr/.env.example`
+- `docs/examples/webui/docker-compose.yml`
+- `docs/examples/webui/Dockerfile`
 
-Quick test with the example compose file:
+Use these pages for the step-by-step launch guides:
 
-```bash
-cd docs/examples/ghcr
-cp .env.example .env
-docker compose run --rm vaq --help
-```
-
-## Run a model
-
-GPU mode:
-
-```bash
-docker compose run --rm vaq run Qwen/Qwen3-0.6B --gpu 0 --port 8000
-```
-
-CPU mode:
-
-```bash
-docker compose run --rm vaq run openai-community/gpt2 --device cpu --port 8000
-```
+- [Classic setup with GPU support](./getting-started-gpu)
+- [CPU-only setup without GPU](./getting-started-cpu-only)
